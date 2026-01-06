@@ -1,0 +1,489 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "qualys.qualys.io/v1alpha1",
+          "kind": "QualysCloudAgent",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "qualys-nanny"
+            },
+            "name": "qualys-cloud-agent",
+            "namespace": "qualys-system"
+          },
+          "spec": {
+            "config": {
+              "cmdMaxTimeOut": 1800,
+              "logLevel": 3
+            },
+            "image": {
+              "pullPolicy": "IfNotPresent",
+              "repository": "nelssec/qualys-agent-bootstrapper",
+              "tag": "v2.1.0"
+            },
+            "platformConfigRef": {
+              "name": "qualys-platform"
+            },
+            "resources": {
+              "limits": {
+                "cpu": "500m",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              }
+            },
+            "scheduling": {
+              "nodeSelector": {
+                "kubernetes.io/os": "linux"
+              },
+              "priorityClassName": "system-node-critical",
+              "tolerations": [
+                {
+                  "effect": "NoSchedule",
+                  "operator": "Exists"
+                },
+                {
+                  "effect": "NoExecute",
+                  "operator": "Exists"
+                }
+              ]
+            },
+            "updateStrategy": {
+              "rollingUpdate": {
+                "maxUnavailable": "25%"
+              },
+              "type": "RollingUpdate"
+            }
+          }
+        },
+        {
+          "apiVersion": "qualys.qualys.io/v1alpha1",
+          "kind": "QualysContainerSecurity",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "qualys-nanny"
+            },
+            "name": "qualys-container-sensor",
+            "namespace": "qualys-system"
+          },
+          "spec": {
+            "containerRuntime": {
+              "type": "auto"
+            },
+            "image": {
+              "pullPolicy": "IfNotPresent",
+              "repository": "qualys/qcs-sensor",
+              "tag": "1.22.0"
+            },
+            "platformConfigRef": {
+              "name": "qualys-platform"
+            },
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "1Gi"
+              },
+              "requests": {
+                "cpu": "250m",
+                "memory": "512Mi"
+              }
+            },
+            "scheduling": {
+              "nodeSelector": {
+                "kubernetes.io/os": "linux"
+              },
+              "priorityClassName": "system-node-critical",
+              "tolerations": [
+                {
+                  "effect": "NoSchedule",
+                  "operator": "Exists"
+                },
+                {
+                  "effect": "NoExecute",
+                  "operator": "Exists"
+                }
+              ]
+            },
+            "sensorConfig": {
+              "k8sMode": true,
+              "logging": {
+                "logFilePurgeCount": 5,
+                "logFileSize": "10M",
+                "logLevel": 3
+              },
+              "mode": "general",
+              "scanning": {
+                "containerLaunchTimeout": "10m",
+                "enableContainerScan": true,
+                "enableImageScan": true,
+                "scanThreadPoolSize": 2
+              },
+              "storage": {
+                "storageSize": "10Gi",
+                "usePersistentStorage": true
+              }
+            },
+            "updateStrategy": {
+              "rollingUpdate": {
+                "maxUnavailable": "25%"
+              },
+              "type": "RollingUpdate"
+            }
+          }
+        },
+        {
+          "apiVersion": "qualys.qualys.io/v1alpha1",
+          "kind": "QualysPlatformConfig",
+          "metadata": {
+            "labels": {
+              "app.kubernetes.io/managed-by": "kustomize",
+              "app.kubernetes.io/name": "qualys-nanny"
+            },
+            "name": "qualys-platform"
+          },
+          "spec": {
+            "credentials": {
+              "secretRef": {
+                "name": "qualys-credentials",
+                "namespace": "qualys-system"
+              },
+              "sourceType": "secret"
+            },
+            "platform": {
+              "serverUri": "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
+            }
+          }
+        }
+      ]
+    capabilities: Full Lifecycle
+    categories: Security
+    containerImage: quay.io/nelssec/qualys-nanny:v0.1.0
+    createdAt: "2026-01-06T21:40:30Z"
+    description: Automatically deploy and manage Qualys Cloud Agent and Container
+      Security Sensor on OpenShift clusters
+    operators.operatorframework.io/builder: operator-sdk-v1.42.0
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+    repository: https://github.com/nelssec/qualys-nanny
+    support: NelsSec
+  name: qualys-nanny.v0.0.1
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: |-
+        QualysCloudAgent is the Schema for the qualyscloudagents API.
+        It manages the deployment of Qualys Cloud Agent as a DaemonSet.
+      displayName: Qualys Cloud Agent
+      kind: QualysCloudAgent
+      name: qualyscloudagents.qualys.qualys.io
+      version: v1alpha1
+    - description: |-
+        QualysContainerSecurity is the Schema for the qualyscontainersecurities API.
+        It manages the deployment of Qualys Container Security Sensor as a DaemonSet.
+      displayName: Qualys Container Security
+      kind: QualysContainerSecurity
+      name: qualyscontainersecurities.qualys.qualys.io
+      version: v1alpha1
+    - description: |-
+        QualysPlatformConfig is the Schema for the qualysplatformconfigs API.
+        It provides cluster-wide Qualys platform configuration including credentials.
+      displayName: Qualys Platform Config
+      kind: QualysPlatformConfig
+      name: qualysplatformconfigs.qualys.qualys.io
+      version: v1alpha1
+  description: |
+    ## Qualys Nanny Operator
+
+    The Qualys Nanny Operator automatically deploys and manages Qualys security agents on OpenShift clusters.
+
+    ### Features
+
+    - **Qualys Cloud Agent**: Host-level vulnerability management and compliance scanning
+    - **Container Security Sensor**: Container image and runtime scanning
+    - **OpenShift Integration**: Automatic SecurityContextConstraints management
+    - **Flexible Credentials**: Support for Kubernetes Secrets and External Secrets Operator
+
+    ### Prerequisites
+
+    - OpenShift 4.12+
+    - Qualys subscription with Cloud Agent and/or Container Security
+    - Qualys activation ID and customer ID
+
+    ### Getting Started
+
+    1. Create a Secret with your Qualys credentials:
+       ```yaml
+       apiVersion: v1
+       kind: Secret
+       metadata:
+         name: qualys-credentials
+         namespace: qualys-system
+       type: Opaque
+       stringData:
+         ACTIVATION_ID: "your-activation-id"
+         CUSTOMER_ID: "your-customer-id"
+       ```
+
+    2. Create a QualysPlatformConfig:
+       ```yaml
+       apiVersion: qualys.qualys.io/v1alpha1
+       kind: QualysPlatformConfig
+       metadata:
+         name: qualys-platform
+       spec:
+         platform:
+           serverUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
+         credentials:
+           sourceType: secret
+           secretRef:
+             name: qualys-credentials
+             namespace: qualys-system
+       ```
+
+    3. Deploy the Cloud Agent and/or Container Security Sensor by creating the respective CRs.
+  displayName: Qualys Nanny
+  icon:
+  - base64data: ""
+    mediatype: image/png
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          - nodes
+          - secrets
+          - serviceaccounts
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        - apiGroups:
+          - apps
+          resources:
+          - daemonsets
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - qualys.qualys.io
+          resources:
+          - qualyscloudagents
+          - qualyscontainersecurities
+          - qualysplatformconfigs
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - qualys.qualys.io
+          resources:
+          - qualyscloudagents/finalizers
+          - qualyscontainersecurities/finalizers
+          - qualysplatformconfigs/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - qualys.qualys.io
+          resources:
+          - qualyscloudagents/status
+          - qualyscontainersecurities/status
+          - qualysplatformconfigs/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resources:
+          - clusterrolebindings
+          - clusterroles
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - security.openshift.io
+          resources:
+          - securitycontextconstraints
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - use
+          - watch
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+        serviceAccountName: qualys-nanny-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: qualys-nanny
+          control-plane: controller-manager
+        name: qualys-nanny-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: qualys-nanny
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              labels:
+                app.kubernetes.io/name: qualys-nanny
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --metrics-bind-address=:8443
+                - --leader-elect
+                - --health-probe-bind-address=:8081
+                command:
+                - /manager
+                image: controller:latest
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              serviceAccountName: qualys-nanny-controller-manager
+              terminationGracePeriodSeconds: 10
+      permissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        serviceAccountName: qualys-nanny-controller-manager
+    strategy: deployment
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - security
+  - qualys
+  - vulnerability
+  - compliance
+  - container security
+  - openshift
+  links:
+  - name: Qualys
+    url: https://www.qualys.com
+  - name: Documentation
+    url: https://github.com/nelssec/qualys-nanny
+  maintainers:
+  - email: support@nelssec.io
+    name: NelsSec
+  maturity: alpha
+  minKubeVersion: 1.25.0
+  provider:
+    name: NelsSec
+    url: https://github.com/nelssec
+  version: 0.0.1

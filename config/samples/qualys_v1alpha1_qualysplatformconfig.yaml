@@ -1,0 +1,35 @@
+apiVersion: qualys.qualys.io/v1alpha1
+kind: QualysPlatformConfig
+metadata:
+  labels:
+    app.kubernetes.io/name: qualys-nanny
+    app.kubernetes.io/managed-by: kustomize
+  name: qualys-platform
+spec:
+  platform:
+    # Qualys platform URL - update for your region
+    # US Platform 1: https://qagpublic.qg1.apps.qualys.com/CloudAgent/
+    # US Platform 2: https://qagpublic.qg2.apps.qualys.com/CloudAgent/
+    # EU Platform: https://qagpublic.qg1.apps.qualys.eu/CloudAgent/
+    serverUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
+    # Optional proxy configuration
+    # proxy:
+    #   qualysHttpsProxy: "https://proxy.example.com:8080"
+    #   proxyOrder: "sequential"
+    #   proxyFailOpen: true
+  credentials:
+    sourceType: secret
+    secretRef:
+      name: qualys-credentials
+      namespace: qualys-system
+---
+# Example credentials Secret (create separately with your actual credentials)
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: qualys-credentials
+#   namespace: qualys-system
+# type: Opaque
+# stringData:
+#   ACTIVATION_ID: "your-activation-id"
+#   CUSTOMER_ID: "your-customer-id"

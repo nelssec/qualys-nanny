@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- qualys_v1alpha1_qualysplatformconfig.yaml
+- qualys_v1alpha1_qualyscloudagent.yaml
+- qualys_v1alpha1_qualyscontainersecurity.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

@@ -1,0 +1,127 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: '[]'
+    capabilities: Full Lifecycle
+    categories: Security
+    containerImage: quay.io/nelssec/qualys-nanny:v0.1.0
+    description: Automatically deploy and manage Qualys Cloud Agent and Container
+      Security Sensor on OpenShift clusters
+    repository: https://github.com/nelssec/qualys-nanny
+    support: NelsSec
+  name: qualys-nanny.v0.0.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: |-
+        QualysCloudAgent is the Schema for the qualyscloudagents API.
+        It manages the deployment of Qualys Cloud Agent as a DaemonSet.
+      displayName: Qualys Cloud Agent
+      kind: QualysCloudAgent
+      name: qualyscloudagents.qualys.qualys.io
+      version: v1alpha1
+    - description: |-
+        QualysContainerSecurity is the Schema for the qualyscontainersecurities API.
+        It manages the deployment of Qualys Container Security Sensor as a DaemonSet.
+      displayName: Qualys Container Security
+      kind: QualysContainerSecurity
+      name: qualyscontainersecurities.qualys.qualys.io
+      version: v1alpha1
+    - description: |-
+        QualysPlatformConfig is the Schema for the qualysplatformconfigs API.
+        It provides cluster-wide Qualys platform configuration including credentials.
+      displayName: Qualys Platform Config
+      kind: QualysPlatformConfig
+      name: qualysplatformconfigs.qualys.qualys.io
+      version: v1alpha1
+  description: |
+    ## Qualys Nanny Operator
+
+    The Qualys Nanny Operator automatically deploys and manages Qualys security agents on OpenShift clusters.
+
+    ### Features
+
+    - **Qualys Cloud Agent**: Host-level vulnerability management and compliance scanning
+    - **Container Security Sensor**: Container image and runtime scanning
+    - **OpenShift Integration**: Automatic SecurityContextConstraints management
+    - **Flexible Credentials**: Support for Kubernetes Secrets and External Secrets Operator
+
+    ### Prerequisites
+
+    - OpenShift 4.12+
+    - Qualys subscription with Cloud Agent and/or Container Security
+    - Qualys activation ID and customer ID
+
+    ### Getting Started
+
+    1. Create a Secret with your Qualys credentials:
+       ```yaml
+       apiVersion: v1
+       kind: Secret
+       metadata:
+         name: qualys-credentials
+         namespace: qualys-system
+       type: Opaque
+       stringData:
+         ACTIVATION_ID: "your-activation-id"
+         CUSTOMER_ID: "your-customer-id"
+       ```
+
+    2. Create a QualysPlatformConfig:
+       ```yaml
+       apiVersion: qualys.qualys.io/v1alpha1
+       kind: QualysPlatformConfig
+       metadata:
+         name: qualys-platform
+       spec:
+         platform:
+           serverUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
+         credentials:
+           sourceType: secret
+           secretRef:
+             name: qualys-credentials
+             namespace: qualys-system
+       ```
+
+    3. Deploy the Cloud Agent and/or Container Security Sensor by creating the respective CRs.
+  displayName: Qualys Nanny
+  icon:
+  - base64data: ""
+    mediatype: image/png
+  install:
+    spec:
+      deployments: null
+    strategy: ""
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  keywords:
+  - security
+  - qualys
+  - vulnerability
+  - compliance
+  - container security
+  - openshift
+  links:
+  - name: Qualys
+    url: https://www.qualys.com
+  - name: Documentation
+    url: https://github.com/nelssec/qualys-nanny
+  maintainers:
+  - email: support@nelssec.io
+    name: NelsSec
+  maturity: alpha
+  minKubeVersion: 1.25.0
+  provider:
+    name: NelsSec
+    url: https://github.com/nelssec
+  version: 0.0.0

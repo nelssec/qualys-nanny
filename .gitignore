@@ -1,0 +1,42 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+testbin/
+dist/
+
+# Go
+go.work
+go.work.sum
+vendor/
+
+# Test artifacts
+cover.out
+*.coverprofile
+
+# Kubernetes
+Dockerfile.cross
+!vendor/**/zz_generated.*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit)
+*.pem
+*.key
+credentials.json
+.env
+.env.*

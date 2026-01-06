@@ -1,0 +1,69 @@
+apiVersion: qualys.qualys.io/v1alpha1
+kind: QualysContainerSecurity
+metadata:
+  labels:
+    app.kubernetes.io/name: qualys-nanny
+    app.kubernetes.io/managed-by: kustomize
+  name: qualys-container-sensor
+  namespace: qualys-system
+spec:
+  # Reference to the QualysPlatformConfig
+  platformConfigRef:
+    name: qualys-platform
+
+  # Container image configuration
+  image:
+    repository: qualys/qcs-sensor
+    tag: 1.22.0
+    pullPolicy: IfNotPresent
+
+  # Container runtime configuration (auto-detected on OpenShift)
+  containerRuntime:
+    type: auto  # auto, containerd, cri-o, docker
+    # socketPaths:
+    #   containerd: "/var/run/containerd/containerd.sock"
+    #   crio: "/var/run/crio/crio.sock"
+    #   docker: "/var/run/docker.sock"
+
+  # Sensor configuration
+  sensorConfig:
+    mode: general  # general, registry, cicd
+    k8sMode: true
+    scanning:
+      enableImageScan: true
+      enableContainerScan: true
+      scanThreadPoolSize: 2
+      containerLaunchTimeout: "10m"
+    storage:
+      usePersistentStorage: true
+      storageSize: "10Gi"
+    logging:
+      logLevel: 3
+      logFileSize: "10M"
+      logFilePurgeCount: 5
+
+  # Resource requirements
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+  # Scheduling options
+  scheduling:
+    nodeSelector:
+      kubernetes.io/os: linux
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: NoExecute
+    priorityClassName: system-node-critical
+
+  # Update strategy
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: "25%"

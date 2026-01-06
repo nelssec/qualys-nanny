@@ -1,0 +1,59 @@
+apiVersion: qualys.qualys.io/v1alpha1
+kind: QualysCloudAgent
+metadata:
+  labels:
+    app.kubernetes.io/name: qualys-nanny
+    app.kubernetes.io/managed-by: kustomize
+  name: qualys-cloud-agent
+  namespace: qualys-system
+spec:
+  # Reference to the QualysPlatformConfig
+  platformConfigRef:
+    name: qualys-platform
+
+  # Container image configuration
+  image:
+    repository: nelssec/qualys-agent-bootstrapper
+    tag: v2.1.0
+    pullPolicy: IfNotPresent
+
+  # Agent configuration
+  config:
+    logLevel: 3  # 0=fatal, 1=error, 2=warning, 3=info, 4=debug, 5=trace
+    cmdMaxTimeOut: 1800
+    # Optional settings:
+    # logFileDir: "/var/log/qualys/"
+    # useSudo: false
+    # useAuditDispatcher: false
+
+  # Resource requirements
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Scheduling options
+  scheduling:
+    nodeSelector:
+      kubernetes.io/os: linux
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: NoExecute
+    priorityClassName: system-node-critical
+
+  # Update strategy
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: "25%"
+
+  # OpenShift-specific settings (auto-detected)
+  # openshift:
+  #   scc:
+  #     create: true
+  #     name: qualys-cloud-agent-scc

@@ -1,0 +1,27 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: qualys-nanny
+  name: qualys-nanny-qualyscloudagent-editor-role
+rules:
+- apiGroups:
+  - qualys.qualys.io
+  resources:
+  - qualyscloudagents
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - qualys.qualys.io
+  resources:
+  - qualyscloudagents/status
+  verbs:
+  - get
