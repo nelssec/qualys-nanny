@@ -25,6 +25,8 @@ import (
 	qualysv1alpha1 "github.com/nelssec/qualys-nanny/api/v1alpha1"
 )
 
+const boolTrue = "true"
+
 func BuildCloudAgentConfigMap(name, namespace string, platformConfig *qualysv1alpha1.QualysPlatformConfig, agentConfig qualysv1alpha1.CloudAgentConfig) *corev1.ConfigMap {
 	data := map[string]string{
 		"SERVER_URI": platformConfig.Spec.Platform.ServerUri,
@@ -122,21 +124,21 @@ func BuildContainerSensorConfigMap(name, namespace string, platformConfig *qualy
 	}
 
 	if sensorConfig.K8sMode {
-		data["K8S_MODE"] = "true"
+		data["K8S_MODE"] = boolTrue
 	}
 
 	if sensorConfig.Scanning != nil {
 		if sensorConfig.Scanning.EnableImageScan {
-			data["ENABLE_IMAGE_SCAN"] = "true"
+			data["ENABLE_IMAGE_SCAN"] = boolTrue
 		}
 		if sensorConfig.Scanning.EnableContainerScan {
-			data["ENABLE_CONTAINER_SCAN"] = "true"
+			data["ENABLE_CONTAINER_SCAN"] = boolTrue
 		}
 		if sensorConfig.Scanning.EnableMalwareDetection {
-			data["ENABLE_MALWARE_DETECTION"] = "true"
+			data["ENABLE_MALWARE_DETECTION"] = boolTrue
 		}
 		if sensorConfig.Scanning.EnableSecretDetection {
-			data["ENABLE_SECRET_DETECTION"] = "true"
+			data["ENABLE_SECRET_DETECTION"] = boolTrue
 		}
 		if sensorConfig.Scanning.ScanThreadPoolSize > 0 {
 			data["SCAN_THREAD_POOL_SIZE"] = strconv.Itoa(sensorConfig.Scanning.ScanThreadPoolSize)
@@ -148,7 +150,7 @@ func BuildContainerSensorConfigMap(name, namespace string, platformConfig *qualy
 
 	if sensorConfig.Logging != nil {
 		if sensorConfig.Logging.EnableConsoleLogs {
-			data["ENABLE_CONSOLE_LOGS"] = "true"
+			data["ENABLE_CONSOLE_LOGS"] = boolTrue
 		}
 		data["LOG_LEVEL"] = strconv.Itoa(sensorConfig.Logging.LogLevel)
 		if sensorConfig.Logging.LogFileSize != "" {

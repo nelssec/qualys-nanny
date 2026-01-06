@@ -119,7 +119,7 @@ func (r *QualysContainerSecurityReconciler) Reconcile(ctx context.Context, req c
 	if err := r.reconcileServiceAccount(ctx, sensor, serviceAccountName); err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.reconcileClusterRole(ctx, sensor, clusterRoleName); err != nil {
+	if err := r.reconcileClusterRole(ctx, clusterRoleName); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.reconcileClusterRoleBinding(ctx, sensor, clusterRoleBindingName, serviceAccountName, clusterRoleName); err != nil {
@@ -192,7 +192,7 @@ func (r *QualysContainerSecurityReconciler) reconcileServiceAccount(ctx context.
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileClusterRole(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, name string) error {
+func (r *QualysContainerSecurityReconciler) reconcileClusterRole(ctx context.Context, name string) error {
 	role := resources.BuildContainerSensorClusterRole(name)
 
 	existing := &rbacv1.ClusterRole{}
@@ -268,8 +268,8 @@ func (r *QualysContainerSecurityReconciler) reconcileConfigMap(ctx context.Conte
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileDaemonSet(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, configMapName, secretName, serviceAccountName string, runtime platform.ContainerRuntime) error {
-	ds := r.buildContainerSensorDaemonSet(sensor, configMapName, secretName, serviceAccountName, runtime)
+func (r *QualysContainerSecurityReconciler) reconcileDaemonSet(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, configMapName, secretName, serviceAccountName string, rt platform.ContainerRuntime) error {
+	ds := r.buildContainerSensorDaemonSet(sensor, configMapName, secretName, serviceAccountName, rt)
 
 	if err := controllerutil.SetControllerReference(sensor, ds, r.Scheme); err != nil {
 		return err
@@ -291,7 +291,7 @@ func (r *QualysContainerSecurityReconciler) reconcileDaemonSet(ctx context.Conte
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor *qualysv1alpha1.QualysContainerSecurity, configMapName, secretName, serviceAccountName string, runtime platform.ContainerRuntime) *appsv1.DaemonSet {
+func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor *qualysv1alpha1.QualysContainerSecurity, configMapName, secretName, serviceAccountName string, rt platform.ContainerRuntime) *appsv1.DaemonSet {
 	image := sensor.Spec.GetImage()
 	scheduling := sensor.Spec.GetScheduling()
 	updateStrategy := sensor.Spec.GetUpdateStrategy()
@@ -304,7 +304,7 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 	}
 
 	runtimeConfig := sensor.Spec.GetContainerRuntime()
-	socketPath := getSocketPath(runtimeConfig, runtime)
+	socketPath := getSocketPath(runtimeConfig, rt)
 
 	maxUnavailable := parseIntOrString(updateStrategy.RollingUpdate.MaxUnavailable)
 
@@ -471,9 +471,9 @@ func int64Ptr(i int64) *int64 {
 	return &i
 }
 
-func getSocketPath(runtimeConfig qualysv1alpha1.ContainerRuntimeConfig, runtime platform.ContainerRuntime) string {
+func getSocketPath(runtimeConfig qualysv1alpha1.ContainerRuntimeConfig, rt platform.ContainerRuntime) string {
 	if runtimeConfig.SocketPaths == nil {
-		switch runtime {
+		switch rt {
 		case platform.RuntimeCRIO:
 			return "/var/run/crio/crio.sock"
 		case platform.RuntimeDocker:
@@ -483,7 +483,7 @@ func getSocketPath(runtimeConfig qualysv1alpha1.ContainerRuntimeConfig, runtime 
 		}
 	}
 
-	switch runtime {
+	switch rt {
 	case platform.RuntimeCRIO:
 		if runtimeConfig.SocketPaths.CRIO != "" {
 			return runtimeConfig.SocketPaths.CRIO

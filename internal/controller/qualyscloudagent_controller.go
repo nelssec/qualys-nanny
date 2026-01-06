@@ -118,7 +118,7 @@ func (r *QualysCloudAgentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err := r.reconcileServiceAccount(ctx, agent, serviceAccountName); err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.reconcileClusterRole(ctx, agent, clusterRoleName); err != nil {
+	if err := r.reconcileClusterRole(ctx, clusterRoleName); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.reconcileClusterRoleBinding(ctx, agent, clusterRoleBindingName, serviceAccountName, clusterRoleName); err != nil {
@@ -165,7 +165,7 @@ func (r *QualysCloudAgentReconciler) reconcileServiceAccount(ctx context.Context
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysCloudAgentReconciler) reconcileClusterRole(ctx context.Context, agent *qualysv1alpha1.QualysCloudAgent, name string) error {
+func (r *QualysCloudAgentReconciler) reconcileClusterRole(ctx context.Context, name string) error {
 	role := resources.BuildCloudAgentClusterRole(name)
 	existing := &rbacv1.ClusterRole{}
 	err := r.Get(ctx, types.NamespacedName{Name: name}, existing)
