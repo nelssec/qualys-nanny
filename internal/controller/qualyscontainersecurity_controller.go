@@ -136,7 +136,7 @@ func (r *QualysContainerSecurityReconciler) Reconcile(ctx context.Context, req c
 	if err := r.reconcileConfigMap(ctx, sensor, configMapName, platformConfig, sensorConfig); err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.reconcileDaemonSet(ctx, sensor, configMapName, secretRef.Name, serviceAccountName, detectedRuntime); err != nil {
+	if err := r.reconcileDaemonSet(ctx, sensor, secretRef.Name, serviceAccountName, detectedRuntime); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.updateStatusFromDaemonSet(ctx, sensor); err != nil {
@@ -268,8 +268,8 @@ func (r *QualysContainerSecurityReconciler) reconcileConfigMap(ctx context.Conte
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileDaemonSet(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, configMapName, secretName, serviceAccountName string, rt platform.ContainerRuntime) error {
-	ds := r.buildContainerSensorDaemonSet(sensor, configMapName, secretName, serviceAccountName, rt)
+func (r *QualysContainerSecurityReconciler) reconcileDaemonSet(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, secretName, serviceAccountName string, rt platform.ContainerRuntime) error {
+	ds := r.buildContainerSensorDaemonSet(sensor, secretName, serviceAccountName, rt)
 
 	if err := controllerutil.SetControllerReference(sensor, ds, r.Scheme); err != nil {
 		return err
@@ -291,7 +291,7 @@ func (r *QualysContainerSecurityReconciler) reconcileDaemonSet(ctx context.Conte
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor *qualysv1alpha1.QualysContainerSecurity, configMapName, secretName, serviceAccountName string, rt platform.ContainerRuntime) *appsv1.DaemonSet {
+func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor *qualysv1alpha1.QualysContainerSecurity, secretName, serviceAccountName string, rt platform.ContainerRuntime) *appsv1.DaemonSet {
 	image := sensor.Spec.GetImage()
 	scheduling := sensor.Spec.GetScheduling()
 	updateStrategy := sensor.Spec.GetUpdateStrategy()
