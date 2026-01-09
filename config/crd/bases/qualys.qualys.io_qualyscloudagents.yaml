@@ -33,9 +33,6 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: |-
-          QualysCloudAgent is the Schema for the qualyscloudagents API.
-          It manages the deployment of Qualys Cloud Agent as a DaemonSet.
         properties:
           apiVersion:
             description: |-
@@ -55,98 +52,94 @@ spec:
           metadata:
             type: object
           spec:
-            description: QualysCloudAgentSpec defines the desired state of QualysCloudAgent.
             properties:
               config:
-                description: Config contains Qualys Cloud Agent configuration
                 properties:
                   cmdMaxTimeOut:
                     default: 1800
-                    description: CmdMaxTimeOut is the maximum command execution time
-                      in seconds
                     minimum: 1
                     type: integer
                   group:
-                    description: Group is the group for daemon execution
                     type: string
                   hostIdSearchDir:
-                    description: HostIdSearchDir is the directory containing host
-                      ID file
                     maxLength: 256
                     pattern: ^(/[a-zA-Z0-9/_.-]+)?$
                     type: string
                   logCompression:
-                    description: LogCompression enables log compression on rollover
                     type: boolean
                   logDestType:
-                    description: 'LogDestType specifies log destination: "file" or
-                      "syslog"'
                     enum:
                     - file
                     - syslog
                     type: string
                   logFileDir:
-                    description: LogFileDir is the directory for log files
                     maxLength: 256
                     pattern: ^(/[a-zA-Z0-9/_.-]+)?$
                     type: string
                   logLevel:
                     default: 3
-                    description: |-
-                      LogLevel sets the agent log verbosity (0-5)
-                      0=fatal, 1=error, 2=warning, 3=info, 4=debug, 5=trace
                     maximum: 5
                     minimum: 0
                     type: integer
                   maxRandomScanIntervalPC:
-                    description: MaxRandomScanIntervalPC is the random interval for
-                      PC scans (0-43200)
                     maximum: 43200
                     minimum: 0
                     type: integer
                   maxRandomScanIntervalVM:
-                    description: MaxRandomScanIntervalVM is the random interval for
-                      VM scans (0-43200)
                     maximum: 43200
                     minimum: 0
                     type: integer
                   processPriority:
                     default: 0
-                    description: ProcessPriority is the Linux niceness value (-20
-                      to 19)
                     maximum: 19
                     minimum: -20
                     type: integer
                   scanDelayPC:
-                    description: ScanDelayPC is the delay before PC scan in seconds
-                      (0-43200)
                     maximum: 43200
                     minimum: 0
                     type: integer
                   scanDelayVM:
-                    description: ScanDelayVM is the delay before VM scan in seconds
-                      (0-43200)
                     maximum: 43200
                     minimum: 0
                     type: integer
                   sudoCommand:
-                    description: SudoCommand is a custom privilege escalation command
-                      (e.g., pbrun)
                     maxLength: 128
                     pattern: ^[a-zA-Z0-9/_.-]*$
                     type: string
                   useAuditDispatcher:
-                    description: UseAuditDispatcher enables FIM with auditd
                     type: boolean
                   useSudo:
-                    description: UseSudo enables running commands with sudo
                     type: boolean
                   user:
-                    description: User is the username for daemon execution
                     type: string
                 type: object
+              coreosConfig:
+                properties:
+                  cpuLimit:
+                    default: 200m
+                    pattern: ^[0-9]+m?$
+                    type: string
+                  providerName:
+                    default: AUTO
+                    enum:
+                    - AWS
+                    - AZURE
+                    - GCP
+                    - IBM
+                    - ALIBABA
+                    - ORACLE
+                    - NONE
+                    - AUTO
+                    type: string
+                type: object
+              deploymentMode:
+                default: auto
+                enum:
+                - auto
+                - bootstrapper
+                - coreos
+                type: string
               image:
-                description: Image defines the container image to use
                 properties:
                   pullPolicy:
                     default: IfNotPresent
@@ -183,7 +176,6 @@ spec:
                 - repository
                 type: object
               openshift:
-                description: OpenShift defines OpenShift-specific settings
                 properties:
                   scc:
                     properties:
@@ -197,8 +189,6 @@ spec:
                     type: string
                 type: object
               platformConfigRef:
-                description: PlatformConfigRef references the QualysPlatformConfig
-                  to use
                 properties:
                   name:
                     type: string
@@ -206,8 +196,7 @@ spec:
                 - name
                 type: object
               resources:
-                description: Resources defines resource requirements for the agent
-                  container
+                description: ResourceRequirements describes the compute resource requirements.
                 properties:
                   claims:
                     description: |-
@@ -266,7 +255,6 @@ spec:
                     type: object
                 type: object
               scheduling:
-                description: Scheduling defines pod scheduling options
                 properties:
                   affinity:
                     description: Affinity is a group of affinity scheduling rules.
@@ -1234,7 +1222,6 @@ spec:
                     type: array
                 type: object
               updateStrategy:
-                description: UpdateStrategy defines the DaemonSet update strategy
                 properties:
                   rollingUpdate:
                     properties:
@@ -1253,11 +1240,8 @@ spec:
             - platformConfigRef
             type: object
           status:
-            description: QualysCloudAgentStatus defines the observed state of QualysCloudAgent.
             properties:
               conditions:
-                description: Conditions represent the latest available observations
-                  of the resource's state
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -1314,39 +1298,30 @@ spec:
                   type: object
                 type: array
               currentNumberScheduled:
-                description: CurrentNumberScheduled is the number of nodes running
-                  at least one agent pod
                 format: int32
                 type: integer
               daemonSetName:
-                description: DaemonSetName is the name of the managed DaemonSet
+                type: string
+              deploymentMode:
                 type: string
               desiredNumberScheduled:
-                description: DesiredNumberScheduled is the total number of nodes that
-                  should be running the agent
                 format: int32
                 type: integer
+              detectedOS:
+                type: string
               numberAvailable:
-                description: NumberAvailable is the number of nodes with available
-                  agent pods
                 format: int32
                 type: integer
               numberMisscheduled:
-                description: NumberMisscheduled is the number of nodes running agent
-                  pods that shouldn't be
                 format: int32
                 type: integer
               numberReady:
-                description: NumberReady is the number of nodes with ready agent pods
                 format: int32
                 type: integer
               observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
                 format: int64
                 type: integer
               updatedNumberScheduled:
-                description: UpdatedNumberScheduled is the number of nodes running
-                  updated agent pods
                 format: int32
                 type: integer
             type: object

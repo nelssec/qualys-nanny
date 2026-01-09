@@ -8,9 +8,21 @@ The Qualys Nanny Operator simplifies the deployment of Qualys security agents ac
 
 - Managing Qualys Cloud Agent as a DaemonSet for host-level vulnerability and compliance scanning
 - Managing Qualys Container Security Sensor for container image and runtime scanning
+- Automatically detecting node OS (CoreOS, RHEL, Debian) and selecting appropriate deployment mode
 - Automatically creating required SecurityContextConstraints on OpenShift
 - Supporting both native Kubernetes Secrets and External Secrets Operator for credential management
 - Auto-detecting container runtime (containerd, CRI-O, Docker)
+
+### Deployment Modes
+
+The Cloud Agent supports two deployment modes based on the node operating system:
+
+| Mode | OS Types | Image | Description |
+|------|----------|-------|-------------|
+| `bootstrapper` | RHEL, CentOS, Debian, Ubuntu | `nelssec/qualys-agent-bootstrapper` | Installs agent on host via nsenter |
+| `coreos` | CoreOS, RHCOS, Flatcar | `qualys/qagent-rhcos` | Runs agent in container (immutable OS) |
+
+Set `deploymentMode: auto` (default) to let the operator detect the appropriate mode.
 
 ## Architecture
 
@@ -63,7 +75,7 @@ operator-sdk run bundle <your-registry>/qualys-nanny-bundle:v0.1.0
 ### 1. Create the Namespace
 
 ```bash
-kubectl create namespace qualys-system
+kubectl create namespace qualys
 ```
 
 ### 2. Create Credentials Secret
@@ -73,7 +85,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: qualys-credentials
-  namespace: qualys-system
+  namespace: qualys
 type: Opaque
 stringData:
   ACTIVATION_ID: "your-activation-id"
@@ -94,7 +106,7 @@ spec:
     sourceType: secret
     secretRef:
       name: qualys-credentials
-      namespace: qualys-system
+      namespace: qualys
 ```
 
 ### 4. Deploy Cloud Agent
@@ -104,13 +116,11 @@ apiVersion: qualys.qualys.io/v1alpha1
 kind: QualysCloudAgent
 metadata:
   name: qualys-cloud-agent
-  namespace: qualys-system
+  namespace: qualys
 spec:
   platformConfigRef:
     name: qualys-platform
-  image:
-    repository: nelssec/qualys-agent-bootstrapper
-    tag: v2.1.0
+  deploymentMode: auto
   config:
     logLevel: 3
   scheduling:
@@ -125,13 +135,10 @@ apiVersion: qualys.qualys.io/v1alpha1
 kind: QualysContainerSecurity
 metadata:
   name: qualys-container-sensor
-  namespace: qualys-system
+  namespace: qualys
 spec:
   platformConfigRef:
     name: qualys-platform
-  image:
-    repository: qualys/qcs-sensor
-    tag: 1.22.0
   containerRuntime:
     type: auto
   sensorConfig:
@@ -156,8 +163,9 @@ spec:
 | Field | Description | Default |
 |-------|-------------|---------|
 | `spec.platformConfigRef.name` | Name of QualysPlatformConfig | Required |
-| `spec.image.repository` | Container image | `nelssec/qualys-agent-bootstrapper` |
-| `spec.image.tag` | Image tag | `v2.1.0` |
+| `spec.deploymentMode` | `auto`, `bootstrapper`, or `coreos` | `auto` |
+| `spec.image.repository` | Container image | Auto-selected based on mode |
+| `spec.image.tag` | Image tag | `v2.1.0` (bootstrapper) / `latest` (coreos) |
 | `spec.config.logLevel` | Log verbosity (0-5) | `3` |
 | `spec.config.cmdMaxTimeOut` | Command timeout (seconds) | `1800` |
 | `spec.scheduling.tolerations` | Pod tolerations | All taints |
@@ -192,7 +200,7 @@ spec:
     sourceType: externalSecret
     externalSecretRef:
       name: qualys-credentials
-      namespace: qualys-system
+      namespace: qualys
       secretStoreRef:
         name: vault-backend
         kind: ClusterSecretStore
@@ -218,21 +226,21 @@ Check deployment status:
 kubectl get qualysplatformconfig qualys-platform -o yaml
 
 # Cloud Agent status
-kubectl get qualyscloudagent -n qualys-system
+kubectl get qualyscloudagent -n qualys
 
 # Container Security status
-kubectl get qualyscontainersecurity -n qualys-system
+kubectl get qualyscontainersecurity -n qualys
 
 # View DaemonSet pods
-kubectl get pods -n qualys-system -l app.kubernetes.io/managed-by=qualys-nanny
+kubectl get pods -n qualys -l app.kubernetes.io/managed-by=qualys-nanny
 ```
 
 ## Uninstallation
 
 ```bash
 # Delete CRs
-kubectl delete qualyscloudagent -n qualys-system --all
-kubectl delete qualyscontainersecurity -n qualys-system --all
+kubectl delete qualyscloudagent -n qualys --all
+kubectl delete qualyscontainersecurity -n qualys --all
 kubectl delete qualysplatformconfig --all
 
 # Uninstall operator

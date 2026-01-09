@@ -5,29 +5,18 @@ metadata:
     app.kubernetes.io/name: qualys-nanny
     app.kubernetes.io/managed-by: kustomize
   name: qualys-container-sensor
-  namespace: qualys-system
+  namespace: qualys
 spec:
-  # Reference to the QualysPlatformConfig
   platformConfigRef:
     name: qualys-platform
-
-  # Container image configuration
   image:
     repository: qualys/qcs-sensor
-    tag: 1.22.0
+    tag: "1.40.1-0"
     pullPolicy: IfNotPresent
-
-  # Container runtime configuration (auto-detected on OpenShift)
   containerRuntime:
-    type: auto  # auto, containerd, cri-o, docker
-    # socketPaths:
-    #   containerd: "/var/run/containerd/containerd.sock"
-    #   crio: "/var/run/crio/crio.sock"
-    #   docker: "/var/run/docker.sock"
-
-  # Sensor configuration
+    type: auto
   sensorConfig:
-    mode: general  # general, registry, cicd
+    mode: general
     k8sMode: true
     scanning:
       enableImageScan: true
@@ -41,8 +30,6 @@ spec:
       logLevel: 3
       logFileSize: "10M"
       logFilePurgeCount: 5
-
-  # Resource requirements
   resources:
     requests:
       cpu: 250m
@@ -50,8 +37,6 @@ spec:
     limits:
       cpu: "1"
       memory: 1Gi
-
-  # Scheduling options
   scheduling:
     nodeSelector:
       kubernetes.io/os: linux
@@ -61,8 +46,6 @@ spec:
       - operator: Exists
         effect: NoExecute
     priorityClassName: system-node-critical
-
-  # Update strategy
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:

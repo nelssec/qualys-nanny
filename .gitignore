@@ -26,6 +26,7 @@ Dockerfile.cross
 # IDE
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~

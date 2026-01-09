@@ -291,7 +291,6 @@ func init() {
 	SchemeBuilder.Register(&QualysContainerSecurity{}, &QualysContainerSecurityList{})
 }
 
-// GetImage returns the image spec with defaults applied
 func (s *QualysContainerSecuritySpec) GetImage() ImageSpec {
 	if s.Image != nil {
 		img := *s.Image
@@ -299,7 +298,7 @@ func (s *QualysContainerSecuritySpec) GetImage() ImageSpec {
 			img.Repository = "qualys/qcs-sensor"
 		}
 		if img.Tag == "" {
-			img.Tag = "1.22.0"
+			img.Tag = "latest"
 		}
 		if img.PullPolicy == "" {
 			img.PullPolicy = corev1.PullIfNotPresent
@@ -308,7 +307,7 @@ func (s *QualysContainerSecuritySpec) GetImage() ImageSpec {
 	}
 	return ImageSpec{
 		Repository: "qualys/qcs-sensor",
-		Tag:        "1.22.0",
+		Tag:        "latest",
 		PullPolicy: corev1.PullIfNotPresent,
 	}
 }

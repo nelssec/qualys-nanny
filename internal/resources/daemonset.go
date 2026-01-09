@@ -22,6 +22,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
@@ -30,6 +31,7 @@ import (
 
 const (
 	CloudAgentContainerName      = "qualys-agent-installer"
+	CoreOSAgentContainerName     = "qualys-cloud-agent"
 	ContainerSensorContainerName = "qualys-container-sensor"
 )
 
@@ -38,8 +40,21 @@ func BuildCloudAgentDaemonSet(
 	configMapName string,
 	secretName string,
 	serviceAccountName string,
+	deploymentMode qualysv1alpha1.DeploymentMode,
 ) *appsv1.DaemonSet {
-	image := agent.Spec.GetImage()
+	if deploymentMode == qualysv1alpha1.DeploymentModeCoreOS {
+		return buildCoreOSDaemonSet(agent, configMapName, secretName, serviceAccountName)
+	}
+	return buildBootstrapperDaemonSet(agent, configMapName, secretName, serviceAccountName)
+}
+
+func buildBootstrapperDaemonSet(
+	agent *qualysv1alpha1.QualysCloudAgent,
+	configMapName string,
+	secretName string,
+	serviceAccountName string,
+) *appsv1.DaemonSet {
+	image := agent.Spec.GetImage(qualysv1alpha1.DeploymentModeBootstrapper)
 	scheduling := agent.Spec.GetScheduling()
 	resources := agent.Spec.GetResources()
 	updateStrategy := agent.Spec.GetUpdateStrategy()
@@ -52,9 +67,9 @@ func BuildCloudAgentDaemonSet(
 		"app.kubernetes.io/component":  "cloud-agent",
 	}
 
-	envVars := buildCloudAgentEnvVars(configMapName, secretName, config)
-	volumeMounts := buildCloudAgentVolumeMounts()
-	volumes := buildCloudAgentVolumes()
+	envVars := buildBootstrapperEnvVars(configMapName, secretName, config)
+	volumeMounts := buildBootstrapperVolumeMounts()
+	volumes := buildBootstrapperVolumes()
 	securityContext := buildPrivilegedSecurityContext()
 	maxUnavailable := intstr.FromString(updateStrategy.RollingUpdate.MaxUnavailable)
 
@@ -152,7 +167,121 @@ func BuildCloudAgentDaemonSet(
 	return ds
 }
 
-func buildCloudAgentEnvVars(configMapName, secretName string, config qualysv1alpha1.CloudAgentConfig) []corev1.EnvVar {
+func buildCoreOSDaemonSet(
+	agent *qualysv1alpha1.QualysCloudAgent,
+	configMapName string,
+	secretName string,
+	serviceAccountName string,
+) *appsv1.DaemonSet {
+	image := agent.Spec.GetImage(qualysv1alpha1.DeploymentModeCoreOS)
+	scheduling := agent.Spec.GetScheduling()
+	updateStrategy := agent.Spec.GetUpdateStrategy()
+	config := agent.Spec.GetConfig()
+	coreosConfig := agent.Spec.GetCoreOSConfig()
+
+	labels := map[string]string{
+		"app.kubernetes.io/name":       "qualys-cloud-agent",
+		"app.kubernetes.io/instance":   agent.Name,
+		"app.kubernetes.io/managed-by": "qualys-nanny",
+		"app.kubernetes.io/component":  "cloud-agent-coreos",
+	}
+
+	envVars := buildCoreOSEnvVars(configMapName, secretName, config, coreosConfig)
+	volumeMounts := buildCoreOSVolumeMounts()
+	volumes := buildCoreOSVolumes()
+	securityContext := buildCoreOSSecurityContext()
+	maxUnavailable := intstr.FromString(updateStrategy.RollingUpdate.MaxUnavailable)
+	cpuLimit := coreosConfig.CPULimit
+	cpuQuantity := resource.MustParse(cpuLimit)
+
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      agent.Name,
+			Namespace: agent.Namespace,
+			Labels:    labels,
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			UpdateStrategy: appsv1.DaemonSetUpdateStrategy{
+				Type: appsv1.DaemonSetUpdateStrategyType(updateStrategy.Type),
+				RollingUpdate: &appsv1.RollingUpdateDaemonSet{
+					MaxUnavailable: &maxUnavailable,
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: labels,
+				},
+				Spec: corev1.PodSpec{
+					ServiceAccountName:            serviceAccountName,
+					AutomountServiceAccountToken:  boolPtr(false),
+					HostPID:                       true,
+					HostNetwork:                   true,
+					PriorityClassName:             scheduling.PriorityClassName,
+					NodeSelector:                  scheduling.NodeSelector,
+					Tolerations:                   scheduling.Tolerations,
+					Affinity:                      scheduling.Affinity,
+					RestartPolicy:                 corev1.RestartPolicyAlways,
+					DNSPolicy:                     corev1.DNSClusterFirstWithHostNet,
+					TerminationGracePeriodSeconds: int64Ptr(30),
+					Containers: []corev1.Container{
+						{
+							Name:            CoreOSAgentContainerName,
+							Image:           fmt.Sprintf("%s:%s", image.Repository, image.Tag),
+							ImagePullPolicy: image.PullPolicy,
+							SecurityContext: securityContext,
+							Env:             envVars,
+							VolumeMounts:    volumeMounts,
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									corev1.ResourceCPU: cpuQuantity,
+								},
+							},
+							LivenessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{
+											"/bin/sh",
+											"-c",
+											"pgrep -f qualys-cloud-agent || exit 1",
+										},
+									},
+								},
+								InitialDelaySeconds: 300,
+								PeriodSeconds:       60,
+								TimeoutSeconds:      10,
+								FailureThreshold:    3,
+							},
+							ReadinessProbe: &corev1.Probe{
+								ProbeHandler: corev1.ProbeHandler{
+									Exec: &corev1.ExecAction{
+										Command: []string{
+											"/bin/sh",
+											"-c",
+											"test -f /etc/qualys/cloud-agent/qualys-cloud-agent.conf",
+										},
+									},
+								},
+								InitialDelaySeconds: 120,
+								PeriodSeconds:       30,
+								TimeoutSeconds:      10,
+								FailureThreshold:    5,
+							},
+						},
+					},
+					Volumes:          volumes,
+					ImagePullSecrets: image.PullSecrets,
+				},
+			},
+		},
+	}
+
+	return ds
+}
+
+func buildBootstrapperEnvVars(configMapName, secretName string, config qualysv1alpha1.CloudAgentConfig) []corev1.EnvVar {
 	envVars := []corev1.EnvVar{
 		{
 			Name: "ACTIVATION_ID",
@@ -305,7 +434,7 @@ func buildCloudAgentEnvVars(configMapName, secretName string, config qualysv1alp
 	return envVars
 }
 
-func buildCloudAgentVolumeMounts() []corev1.VolumeMount {
+func buildBootstrapperVolumeMounts() []corev1.VolumeMount {
 	return []corev1.VolumeMount{
 		{Name: "host-tmp", MountPath: "/host/tmp"},
 		{Name: "host-etc", MountPath: "/host/etc"},
@@ -322,7 +451,7 @@ func buildCloudAgentVolumeMounts() []corev1.VolumeMount {
 	}
 }
 
-func buildCloudAgentVolumes() []corev1.Volume {
+func buildBootstrapperVolumes() []corev1.Volume {
 	directory := corev1.HostPathDirectory
 	directoryOrCreate := corev1.HostPathDirectoryOrCreate
 
@@ -358,6 +487,179 @@ func buildPrivilegedSecurityContext() *corev1.SecurityContext {
 				"SYS_ADMIN",
 				"SYS_CHROOT",
 				"SYS_PTRACE",
+			},
+		},
+	}
+}
+
+func buildCoreOSEnvVars(configMapName, secretName string, config qualysv1alpha1.CloudAgentConfig, coreosConfig qualysv1alpha1.CoreOSConfig) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{
+		{
+			Name: "ACTIVATION_ID",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  "ACTIVATION_ID",
+				},
+			},
+		},
+		{
+			Name: "CUSTOMER_ID",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  "CUSTOMER_ID",
+				},
+			},
+		},
+		{
+			Name: "SERVER_URI",
+			ValueFrom: &corev1.EnvVarSource{
+				ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
+					Key:                  "SERVER_URI",
+				},
+			},
+		},
+		{
+			Name:  "LOG_LEVEL",
+			Value: strconv.Itoa(config.LogLevel),
+		},
+		{
+			Name:  "PROVIDER_NAME",
+			Value: coreosConfig.ProviderName,
+		},
+		{
+			Name:  "CPU",
+			Value: coreosConfig.CPULimit,
+		},
+		{
+			Name: "NODE_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "spec.nodeName",
+				},
+			},
+		},
+		{
+			Name: "POD_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.name",
+				},
+			},
+		},
+		{
+			Name: "POD_NAMESPACE",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "metadata.namespace",
+				},
+			},
+		},
+	}
+
+	if config.HostIdSearchDir != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "HOST_ID_SEARCH_DIR",
+			Value: config.HostIdSearchDir,
+		})
+	}
+
+	return envVars
+}
+
+func buildCoreOSVolumeMounts() []corev1.VolumeMount {
+	return []corev1.VolumeMount{
+		{Name: "host-root", MountPath: "/host", ReadOnly: true},
+		{Name: "crio-sock", MountPath: "/var/run/crio/crio.sock"},
+		{Name: "qualys-data", MountPath: "/usr/local/qualys"},
+		{Name: "host-etc", MountPath: "/etc/qualys-host", ReadOnly: true},
+		{Name: "host-proc", MountPath: "/host/proc", ReadOnly: true},
+		{Name: "host-sys", MountPath: "/host/sys", ReadOnly: true},
+	}
+}
+
+func buildCoreOSVolumes() []corev1.Volume {
+	directory := corev1.HostPathDirectory
+	directoryOrCreate := corev1.HostPathDirectoryOrCreate
+	socket := corev1.HostPathSocket
+
+	return []corev1.Volume{
+		{
+			Name: "host-root",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/",
+					Type: &directory,
+				},
+			},
+		},
+		{
+			Name: "crio-sock",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/var/run/crio/crio.sock",
+					Type: &socket,
+				},
+			},
+		},
+		{
+			Name: "qualys-data",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/var/lib/qualys",
+					Type: &directoryOrCreate,
+				},
+			},
+		},
+		{
+			Name: "host-etc",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/etc",
+					Type: &directory,
+				},
+			},
+		},
+		{
+			Name: "host-proc",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/proc",
+					Type: &directory,
+				},
+			},
+		},
+		{
+			Name: "host-sys",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/sys",
+					Type: &directory,
+				},
+			},
+		},
+	}
+}
+
+func buildCoreOSSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		Privileged:               boolPtr(true),
+		RunAsUser:                int64Ptr(0),
+		RunAsNonRoot:             boolPtr(false),
+		AllowPrivilegeEscalation: boolPtr(true),
+		ReadOnlyRootFilesystem:   boolPtr(false),
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeUnconfined,
+		},
+		Capabilities: &corev1.Capabilities{
+			Add: []corev1.Capability{
+				"SYS_ADMIN",
+				"SYS_CHROOT",
+				"SYS_PTRACE",
+				"NET_ADMIN",
+				"AUDIT_CONTROL",
 			},
 		},
 	}

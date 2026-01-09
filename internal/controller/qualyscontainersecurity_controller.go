@@ -295,6 +295,7 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 	image := sensor.Spec.GetImage()
 	scheduling := sensor.Spec.GetScheduling()
 	updateStrategy := sensor.Spec.GetUpdateStrategy()
+	sensorConfig := sensor.Spec.GetSensorConfig()
 
 	labels := map[string]string{
 		"app.kubernetes.io/name":       "qualys-container-sensor",
@@ -305,8 +306,19 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 
 	runtimeConfig := sensor.Spec.GetContainerRuntime()
 	socketPath := getSocketPath(runtimeConfig, rt)
+	runtimeName := getRuntimeName(rt)
 
 	maxUnavailable := parseIntOrString(updateStrategy.RollingUpdate.MaxUnavailable)
+
+	args := buildSensorArgs(sensorConfig, runtimeName)
+	envVars := buildSensorEnvVars(secretName, sensorConfig)
+	volumeMounts, volumes := buildSensorVolumes(socketPath, sensorConfig)
+	securityContext := buildSensorSecurityContext()
+
+	var resourceReqs corev1.ResourceRequirements
+	if sensor.Spec.Resources != nil {
+		resourceReqs = *sensor.Spec.Resources
+	}
 
 	ds := &appsv1.DaemonSet{
 		ObjectMeta: metav1.ObjectMeta{
@@ -331,6 +343,7 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            serviceAccountName,
 					HostNetwork:                   true,
+					HostPID:                       true,
 					PriorityClassName:             scheduling.PriorityClassName,
 					NodeSelector:                  scheduling.NodeSelector,
 					Tolerations:                   scheduling.Tolerations,
@@ -343,62 +356,14 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 							Name:            resources.ContainerSensorContainerName,
 							Image:           fmt.Sprintf("%s:%s", image.Repository, image.Tag),
 							ImagePullPolicy: image.PullPolicy,
-							Env: []corev1.EnvVar{
-								{
-									Name: "ACTIVATION_ID",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-											Key:                  "ACTIVATION_ID",
-										},
-									},
-								},
-								{
-									Name: "CUSTOMER_ID",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-											Key:                  "CUSTOMER_ID",
-										},
-									},
-								},
-								{
-									Name: "NODE_NAME",
-									ValueFrom: &corev1.EnvVarSource{
-										FieldRef: &corev1.ObjectFieldSelector{
-											FieldPath: "spec.nodeName",
-										},
-									},
-								},
-								{
-									Name:  "RUNTIME_SOCKET",
-									Value: socketPath,
-								},
-							},
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "runtime-socket", MountPath: socketPath},
-								{Name: "var-run", MountPath: "/var/run"},
-							},
+							Args:            args,
+							Env:             envVars,
+							VolumeMounts:    volumeMounts,
+							SecurityContext: securityContext,
+							Resources:       resourceReqs,
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "runtime-socket",
-							VolumeSource: corev1.VolumeSource{
-								HostPath: &corev1.HostPathVolumeSource{
-									Path: socketPath,
-								},
-							},
-						},
-						{
-							Name: "var-run",
-							VolumeSource: corev1.VolumeSource{
-								HostPath: &corev1.HostPathVolumeSource{
-									Path: "/var/run",
-								},
-							},
-						},
-					},
+					Volumes:          volumes,
 					ImagePullSecrets: image.PullSecrets,
 				},
 			},
@@ -406,6 +371,169 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 	}
 
 	return ds
+}
+
+func buildSensorArgs(config qualysv1alpha1.SensorConfig, runtimeName string) []string {
+	args := []string{"--k8s-mode"}
+
+	if runtimeName != "" {
+		args = append(args, "--container-runtime", runtimeName)
+	}
+
+	switch config.Mode {
+	case "cicd":
+		args = append(args, "--cicd-deployed-sensor")
+	case "registry":
+		args = append(args, "--registry-sensor")
+	}
+
+	if config.Logging != nil {
+		args = append(args, "--log-level", fmt.Sprintf("%d", config.Logging.LogLevel))
+		if config.Logging.LogFileSize != "" {
+			args = append(args, "--log-filesize", config.Logging.LogFileSize)
+		}
+		if config.Logging.LogFilePurgeCount > 0 {
+			args = append(args, "--log-filepurgecount", fmt.Sprintf("%d", config.Logging.LogFilePurgeCount))
+		}
+		if config.Logging.EnableConsoleLogs {
+			args = append(args, "--enable-console-logs")
+		}
+	}
+
+	if config.Storage != nil && !config.Storage.UsePersistentStorage {
+		args = append(args, "--sensor-without-persistent-storage")
+	}
+
+	if config.Scanning != nil {
+		if !config.Scanning.EnableImageScan {
+			args = append(args, "--disableImageScan")
+		}
+		if !config.Scanning.EnableContainerScan {
+			args = append(args, "--disableContainerScan")
+		}
+		if config.Scanning.ScanThreadPoolSize > 0 {
+			args = append(args, "--scan-thread-pool-size", fmt.Sprintf("%d", config.Scanning.ScanThreadPoolSize))
+		}
+	}
+
+	args = append(args, config.ExtraArgs...)
+
+	return args
+}
+
+func buildSensorEnvVars(secretName string, _ qualysv1alpha1.SensorConfig) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{
+		{
+			Name: "ACTIVATIONID",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  "ACTIVATION_ID",
+				},
+			},
+		},
+		{
+			Name: "CUSTOMERID",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  "CUSTOMER_ID",
+				},
+			},
+		},
+		{
+			Name: "POD_URL",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "status.podIP",
+				},
+			},
+		},
+		{
+			Name:  "qualys_https_proxy",
+			Value: "",
+		},
+	}
+
+	return envVars
+}
+
+func buildSensorVolumes(socketPath string, _ qualysv1alpha1.SensorConfig) ([]corev1.VolumeMount, []corev1.Volume) {
+	directory := corev1.HostPathDirectory
+	directoryOrCreate := corev1.HostPathDirectoryOrCreate
+	socket := corev1.HostPathSocket
+
+	volumeMounts := []corev1.VolumeMount{
+		{Name: "var-run", MountPath: "/var/run"},
+		{Name: "runtime-socket", MountPath: socketPath},
+		{Name: "host-root", MountPath: "/host", ReadOnly: true},
+		{Name: "qualys-sensor-data", MountPath: "/usr/local/qualys/qpa/data"},
+	}
+
+	volumes := []corev1.Volume{
+		{
+			Name: "var-run",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/var/run",
+					Type: &directory,
+				},
+			},
+		},
+		{
+			Name: "runtime-socket",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: socketPath,
+					Type: &socket,
+				},
+			},
+		},
+		{
+			Name: "host-root",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/",
+					Type: &directory,
+				},
+			},
+		},
+		{
+			Name: "qualys-sensor-data",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/usr/local/qualys/sensor/data",
+					Type: &directoryOrCreate,
+				},
+			},
+		},
+	}
+
+	return volumeMounts, volumes
+}
+
+func buildSensorSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		Privileged:               boolPtr(true),
+		AllowPrivilegeEscalation: boolPtr(true),
+	}
+}
+
+func getRuntimeName(rt platform.ContainerRuntime) string {
+	switch rt {
+	case platform.RuntimeContainerd:
+		return "containerd"
+	case platform.RuntimeCRIO:
+		return "cri-o"
+	case platform.RuntimeDocker:
+		return "docker"
+	default:
+		return ""
+	}
+}
+
+func boolPtr(b bool) *bool {
+	return &b
 }
 
 func (r *QualysContainerSecurityReconciler) updateStatusFromDaemonSet(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity) error {

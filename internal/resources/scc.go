@@ -85,17 +85,20 @@ func BuildContainerSensorSCC(name, namespace, serviceAccountName string) *unstru
 	scc.SetGroupVersionKind(SCCGVK)
 	scc.SetName(name)
 	scc.SetAnnotations(map[string]string{
-		"kubernetes.io/description": "SCC for Qualys Container Security Sensor",
+		"kubernetes.io/description": "SCC for Qualys Container Security Sensor - requires privileged access for container scanning",
 	})
 
 	scc.Object["allowHostDirVolumePlugin"] = true
 	scc.Object["allowHostIPC"] = false
 	scc.Object["allowHostNetwork"] = true
-	scc.Object["allowHostPID"] = false
+	scc.Object["allowHostPID"] = true
 	scc.Object["allowHostPorts"] = false
-	scc.Object["allowPrivilegeEscalation"] = false
-	scc.Object["allowPrivilegedContainer"] = false
-	scc.Object["allowedCapabilities"] = []interface{}{}
+	scc.Object["allowPrivilegeEscalation"] = true
+	scc.Object["allowPrivilegedContainer"] = true
+	scc.Object["allowedCapabilities"] = []interface{}{
+		"SYS_PTRACE",
+		"SYS_ADMIN",
+	}
 	scc.Object["defaultAddCapabilities"] = []interface{}{}
 	scc.Object["fsGroup"] = map[string]interface{}{
 		"type": "RunAsAny",
@@ -103,9 +106,7 @@ func BuildContainerSensorSCC(name, namespace, serviceAccountName string) *unstru
 	scc.Object["groups"] = []interface{}{}
 	scc.Object["priority"] = nil
 	scc.Object["readOnlyRootFilesystem"] = false
-	scc.Object["requiredDropCapabilities"] = []interface{}{
-		"ALL",
-	}
+	scc.Object["requiredDropCapabilities"] = []interface{}{}
 	scc.Object["runAsUser"] = map[string]interface{}{
 		"type": "RunAsAny",
 	}

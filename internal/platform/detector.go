@@ -18,11 +18,14 @@ package platform
 
 import (
 	"context"
+	"strings"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
@@ -30,6 +33,7 @@ var (
 	isOpenShift     *bool
 	detectionMutex  sync.RWMutex
 	dynamicClient   dynamic.Interface
+	kubeClient      kubernetes.Interface
 	clientInitMutex sync.Mutex
 )
 
@@ -128,4 +132,139 @@ func DetectContainerRuntime(nodeContainerRuntimeVersion string) ContainerRuntime
 	}
 
 	return RuntimeUnknown
+}
+
+type OSType string
+
+const (
+	OSTypeCoreOS  OSType = "coreos"
+	OSTypeRHEL    OSType = "rhel"
+	OSTypeDebian  OSType = "debian"
+	OSTypeUnknown OSType = "unknown"
+)
+
+type NodeOSInfo struct {
+	OSType           OSType
+	OSImage          string
+	KernelVersion    string
+	ContainerRuntime ContainerRuntime
+	Architecture     string
+}
+
+func DetectNodeOS(node *corev1.Node) NodeOSInfo {
+	info := NodeOSInfo{
+		OSType:           OSTypeUnknown,
+		OSImage:          node.Status.NodeInfo.OSImage,
+		KernelVersion:    node.Status.NodeInfo.KernelVersion,
+		ContainerRuntime: DetectContainerRuntime(node.Status.NodeInfo.ContainerRuntimeVersion),
+		Architecture:     node.Status.NodeInfo.Architecture,
+	}
+
+	osImage := strings.ToLower(node.Status.NodeInfo.OSImage)
+
+	if strings.Contains(osImage, "coreos") ||
+		strings.Contains(osImage, "rhcos") ||
+		strings.Contains(osImage, "fedora coreos") ||
+		strings.Contains(osImage, "flatcar") {
+		info.OSType = OSTypeCoreOS
+		return info
+	}
+
+	if strings.Contains(osImage, "red hat enterprise linux") ||
+		strings.Contains(osImage, "rhel") ||
+		strings.Contains(osImage, "centos") ||
+		strings.Contains(osImage, "rocky") ||
+		strings.Contains(osImage, "alma") ||
+		strings.Contains(osImage, "oracle linux") ||
+		strings.Contains(osImage, "amazon linux") {
+		info.OSType = OSTypeRHEL
+		return info
+	}
+
+	if strings.Contains(osImage, "debian") ||
+		strings.Contains(osImage, "ubuntu") {
+		info.OSType = OSTypeDebian
+		return info
+	}
+
+	return info
+}
+
+type ClusterOSProfile struct {
+	HasCoreOSNodes bool
+	HasRHELNodes   bool
+	HasDebianNodes bool
+	HasMixedOS     bool
+	PrimaryOS      OSType
+	NodeCount      map[OSType]int
+}
+
+func DetectClusterOSProfile(ctx context.Context) (*ClusterOSProfile, error) {
+	client, err := getKubeClient()
+	if err != nil {
+		return nil, err
+	}
+
+	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	profile := &ClusterOSProfile{
+		NodeCount: make(map[OSType]int),
+	}
+
+	for i := range nodes.Items {
+		nodeInfo := DetectNodeOS(&nodes.Items[i])
+		profile.NodeCount[nodeInfo.OSType]++
+	}
+
+	maxCount := 0
+	osTypes := 0
+	for osType, count := range profile.NodeCount {
+		if count > 0 {
+			osTypes++
+			if count > maxCount {
+				maxCount = count
+				profile.PrimaryOS = osType
+			}
+			switch osType {
+			case OSTypeCoreOS:
+				profile.HasCoreOSNodes = true
+			case OSTypeRHEL:
+				profile.HasRHELNodes = true
+			case OSTypeDebian:
+				profile.HasDebianNodes = true
+			}
+		}
+	}
+
+	profile.HasMixedOS = osTypes > 1
+
+	return profile, nil
+}
+
+func IsCoreOSNode(node *corev1.Node) bool {
+	return DetectNodeOS(node).OSType == OSTypeCoreOS
+}
+
+func getKubeClient() (kubernetes.Interface, error) {
+	clientInitMutex.Lock()
+	defer clientInitMutex.Unlock()
+
+	if kubeClient != nil {
+		return kubeClient, nil
+	}
+
+	cfg, err := config.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	kubeClient, err = kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return kubeClient, nil
 }

@@ -107,6 +107,10 @@ func (r *QualysCloudAgentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{RequeueAfter: RequeueIntervalError}, nil
 	}
 
+	effectiveMode := r.determineDeploymentMode(ctx, agent)
+	agent.Status.DeploymentMode = string(effectiveMode)
+	log.Info("Using deployment mode", "mode", effectiveMode)
+
 	r.setCondition(agent, qualysv1alpha1.ConditionTypeProgressing, metav1.ConditionTrue, "Reconciling", "Creating/updating resources")
 
 	serviceAccountName := agent.Name + "-sa"
@@ -135,7 +139,7 @@ func (r *QualysCloudAgentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err := r.reconcileConfigMap(ctx, agent, configMapName, platformConfig, agentConfig); err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.reconcileDaemonSet(ctx, agent, configMapName, secretRef.Name, serviceAccountName); err != nil {
+	if err := r.reconcileDaemonSet(ctx, agent, configMapName, secretRef.Name, serviceAccountName, effectiveMode); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.updateStatusFromDaemonSet(ctx, agent); err != nil {
@@ -143,6 +147,25 @@ func (r *QualysCloudAgentReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	return ctrl.Result{RequeueAfter: RequeueIntervalDefault}, nil
+}
+
+func (r *QualysCloudAgentReconciler) determineDeploymentMode(ctx context.Context, agent *qualysv1alpha1.QualysCloudAgent) qualysv1alpha1.DeploymentMode {
+	specMode := agent.Spec.GetDeploymentMode()
+
+	if specMode != qualysv1alpha1.DeploymentModeAuto {
+		return specMode
+	}
+
+	osProfile, err := platform.DetectClusterOSProfile(ctx)
+	if err != nil {
+		return qualysv1alpha1.DeploymentModeBootstrapper
+	}
+
+	if osProfile.HasCoreOSNodes {
+		return qualysv1alpha1.DeploymentModeCoreOS
+	}
+
+	return qualysv1alpha1.DeploymentModeBootstrapper
 }
 
 func (r *QualysCloudAgentReconciler) reconcileServiceAccount(ctx context.Context, agent *qualysv1alpha1.QualysCloudAgent, name string) error {
@@ -160,7 +183,6 @@ func (r *QualysCloudAgentReconciler) reconcileServiceAccount(ctx context.Context
 		return err
 	}
 
-	// Update labels if needed
 	existing.Labels = sa.Labels
 	return r.Update(ctx, existing)
 }
@@ -234,8 +256,8 @@ func (r *QualysCloudAgentReconciler) reconcileConfigMap(ctx context.Context, age
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysCloudAgentReconciler) reconcileDaemonSet(ctx context.Context, agent *qualysv1alpha1.QualysCloudAgent, configMapName, secretName, serviceAccountName string) error {
-	ds := resources.BuildCloudAgentDaemonSet(agent, configMapName, secretName, serviceAccountName)
+func (r *QualysCloudAgentReconciler) reconcileDaemonSet(ctx context.Context, agent *qualysv1alpha1.QualysCloudAgent, configMapName, secretName, serviceAccountName string, deploymentMode qualysv1alpha1.DeploymentMode) error {
+	ds := resources.BuildCloudAgentDaemonSet(agent, configMapName, secretName, serviceAccountName, deploymentMode)
 	if err := controllerutil.SetControllerReference(agent, ds, r.Scheme); err != nil {
 		return err
 	}
@@ -249,7 +271,6 @@ func (r *QualysCloudAgentReconciler) reconcileDaemonSet(ctx context.Context, age
 		return err
 	}
 
-	// Update spec
 	existing.Spec = ds.Spec
 	existing.Labels = ds.Labels
 	r.Recorder.Event(agent, corev1.EventTypeNormal, "DaemonSetUpdated", "Updated DaemonSet "+agent.Name)

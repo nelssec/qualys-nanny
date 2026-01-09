@@ -8,47 +8,31 @@ The Qualys Nanny Operator manages two distinct security agents through Kubernete
 
 ```mermaid
 flowchart TB
-    subgraph OpenShift Cluster
-        subgraph Control Plane
-            API[API Server]
-            OPERATOR[Qualys Nanny Operator]
+    subgraph cluster[OpenShift Cluster]
+        OPERATOR[Qualys Nanny Operator]
+
+        subgraph node1[Worker Node 1]
+            CA1[Cloud Agent]
+            CS1[Container Sensor]
         end
 
-        subgraph Worker Nodes
-            subgraph CoreOS/RHEL Node 1
-                CA1[Cloud Agent Pod]
-                CS1[Container Sensor Pod]
-                CRI1[CRI-O Runtime]
-                HOST1[Host OS]
-            end
-
-            subgraph CoreOS/RHEL Node 2
-                CA2[Cloud Agent Pod]
-                CS2[Container Sensor Pod]
-                CRI2[CRI-O Runtime]
-                HOST2[Host OS]
-            end
+        subgraph node2[Worker Node 2]
+            CA2[Cloud Agent]
+            CS2[Container Sensor]
         end
     end
 
-    subgraph Qualys Platform
-        QP[Qualys Cloud Platform]
-    end
+    QP[Qualys Platform]
 
     OPERATOR --> CA1
     OPERATOR --> CA2
     OPERATOR --> CS1
     OPERATOR --> CS2
 
-    CA1 -.->|VM/Compliance Data| QP
-    CA2 -.->|VM/Compliance Data| QP
-    CS1 -.->|Image/Container Data| QP
-    CS2 -.->|Image/Container Data| QP
-
-    CA1 -->|Scans| HOST1
-    CA2 -->|Scans| HOST2
-    CS1 -->|Monitors| CRI1
-    CS2 -->|Monitors| CRI2
+    CA1 --> QP
+    CA2 --> QP
+    CS1 --> QP
+    CS2 --> QP
 ```
 
 ## Custom Resource Hierarchy
@@ -56,21 +40,35 @@ flowchart TB
 The operator uses three CRDs with a hierarchical relationship:
 
 ```mermaid
-erDiagram
-    QualysPlatformConfig ||--o{ QualysCloudAgent : "referenced by"
-    QualysPlatformConfig ||--o{ QualysContainerSecurity : "referenced by"
-    QualysPlatformConfig ||--|| Secret : "reads credentials"
-    QualysPlatformConfig ||--o| ExternalSecret : "or reads from"
+flowchart LR
+    subgraph CRDs
+        PC[QualysPlatformConfig]
+        CA[QualysCloudAgent]
+        CS[QualysContainerSecurity]
+    end
 
-    QualysCloudAgent ||--|| DaemonSet : creates
-    QualysCloudAgent ||--|| ServiceAccount : creates
-    QualysCloudAgent ||--|| ConfigMap : creates
-    QualysCloudAgent ||--|| SCC : "creates on OpenShift"
+    subgraph Credentials
+        SEC[Secret]
+        ESO[ExternalSecret]
+    end
 
-    QualysContainerSecurity ||--|| DaemonSet : creates
-    QualysContainerSecurity ||--|| ServiceAccount : creates
-    QualysContainerSecurity ||--|| ClusterRole : creates
-    QualysContainerSecurity ||--|| SCC : "creates on OpenShift"
+    subgraph Resources
+        DS1[DaemonSet]
+        DS2[DaemonSet]
+        SA[ServiceAccount]
+        CM[ConfigMap]
+        SCC[SCC]
+    end
+
+    PC --> SEC
+    PC --> ESO
+    CA --> PC
+    CS --> PC
+    CA --> DS1
+    CA --> SA
+    CA --> CM
+    CA --> SCC
+    CS --> DS2
 ```
 
 ## Qualys Cloud Agent on CoreOS and RHEL
@@ -86,21 +84,19 @@ sequenceDiagram
     participant Op as Operator
     participant DS as DaemonSet
     participant Pod as Agent Pod
-    participant Host as CoreOS/RHEL Host
+    participant Host as Host OS
     participant QP as Qualys Platform
 
     User->>API: Create QualysCloudAgent CR
     API->>Op: Reconcile event
-    Op->>Op: Validate PlatformConfig
     Op->>API: Create ServiceAccount
-    Op->>API: Create SCC (OpenShift)
+    Op->>API: Create SCC
     Op->>API: Create ConfigMap
     Op->>API: Create DaemonSet
     DS->>Pod: Schedule on each node
-    Pod->>Host: Mount /etc, /var, /proc, /sys
-    Pod->>Host: Run with SYS_ADMIN capability
-    loop Every scan interval
-        Pod->>Host: Scan packages, configs
+    Pod->>Host: Mount host paths
+    loop Scan Interval
+        Pod->>Host: Scan packages
         Pod->>QP: Report findings
     end
 ```
@@ -111,25 +107,13 @@ The Cloud Agent requires extensive host access to perform vulnerability and comp
 
 ```mermaid
 flowchart LR
-    subgraph Agent Pod
-        AGENT[qualys-cloud-agent]
-    end
+    AGENT[Cloud Agent Pod]
 
-    subgraph Host Filesystem
-        ETC[/etc - OS configs]
-        VAR[/var - Package DBs]
-        PROC[/proc - Process info]
-        SYS[/sys - Kernel params]
-        OPT[/opt/qualys - Agent data]
-        HOSTID[/etc/machine-id]
-    end
-
-    AGENT --> ETC
-    AGENT --> VAR
-    AGENT --> PROC
-    AGENT --> SYS
-    AGENT --> OPT
-    AGENT --> HOSTID
+    AGENT --> ETC[/etc]
+    AGENT --> VAR[/var]
+    AGENT --> PROC[/proc]
+    AGENT --> SYS[/sys]
+    AGENT --> OPT[/opt/qualys]
 ```
 
 ### Installation Steps
@@ -140,13 +124,13 @@ flowchart LR
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: qualys-system
+  name: qualys
 ---
 apiVersion: v1
 kind: Secret
 metadata:
   name: qualys-credentials
-  namespace: qualys-system
+  namespace: qualys
 type: Opaque
 stringData:
   ACTIVATION_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
@@ -167,7 +151,7 @@ spec:
     sourceType: secret
     secretRef:
       name: qualys-credentials
-      namespace: qualys-system
+      namespace: qualys
 ```
 
 3. **Deploy the Cloud Agent:**
@@ -177,13 +161,11 @@ apiVersion: qualys.qualys.io/v1alpha1
 kind: QualysCloudAgent
 metadata:
   name: qualys-cloud-agent
-  namespace: qualys-system
+  namespace: qualys
 spec:
   platformConfigRef:
     name: qualys-platform
-  image:
-    repository: nelssec/qualys-agent-bootstrapper
-    tag: v2.1.0
+  deploymentMode: auto
   config:
     logLevel: 3
   scheduling:
@@ -201,26 +183,18 @@ CoreOS uses an immutable root filesystem with atomic updates. The agent handles 
 
 ```mermaid
 flowchart TB
-    subgraph CoreOS Node
-        subgraph Read-Only Root
-            OS[/usr - Immutable OS]
-        end
-
-        subgraph Writable Paths
-            ETC[/etc - Configs]
-            VAR[/var - Data]
-            OPT[/opt - Extensions]
-        end
-
-        subgraph Agent Pod
-            QA[Qualys Agent]
-        end
+    subgraph coreos[CoreOS Node]
+        RO[Read-Only: /usr]
+        RW1[Writable: /etc]
+        RW2[Writable: /var]
+        RW3[Writable: /opt]
+        POD[Agent Pod]
     end
 
-    QA -->|Reads| OS
-    QA -->|Reads| ETC
-    QA -->|Reads| VAR
-    QA -->|Writes| OPT
+    POD -->|reads| RO
+    POD -->|reads| RW1
+    POD -->|reads| RW2
+    POD -->|writes| RW3
 ```
 
 ## Container Security Sensor on OpenShift
@@ -234,56 +208,39 @@ The operator automatically detects the container runtime on OpenShift:
 ```mermaid
 flowchart TD
     START[Start Reconciliation]
-    CHECK_SPEC{Runtime specified in CR?}
+    CHECK{Runtime in CR?}
     USE_SPEC[Use specified runtime]
-    CHECK_OCP{Is OpenShift?}
+    OCP{Is OpenShift?}
     USE_CRIO[Use CRI-O]
-    CHECK_NODE[Query node info]
-    PARSE[Parse containerRuntimeVersion]
+    NODE[Query node info]
 
-    START --> CHECK_SPEC
-    CHECK_SPEC -->|Yes| USE_SPEC
-    CHECK_SPEC -->|No| CHECK_OCP
-    CHECK_OCP -->|Yes| USE_CRIO
-    CHECK_OCP -->|No| CHECK_NODE
-    CHECK_NODE --> PARSE
-
-    PARSE -->|containerd://| CONTAINERD[Use containerd socket]
-    PARSE -->|cri-o://| CRIO2[Use CRI-O socket]
-    PARSE -->|docker://| DOCKER[Use Docker socket]
+    START --> CHECK
+    CHECK -->|Yes| USE_SPEC
+    CHECK -->|No| OCP
+    OCP -->|Yes| USE_CRIO
+    OCP -->|No| NODE
+    NODE --> DETECT[Detect from node]
 ```
 
 ### Sensor Architecture
 
 ```mermaid
 flowchart TB
-    subgraph OpenShift Node
-        subgraph Container Sensor Pod
-            SENSOR[QCS Sensor]
-            SCANNER[Image Scanner]
-            MONITOR[Runtime Monitor]
-        end
+    subgraph node[OpenShift Node]
+        SENSOR[Container Sensor]
+        SOCKET[CRI-O Socket]
+        IMAGES[Image Store]
 
-        subgraph CRI-O Runtime
-            SOCKET[/var/run/crio/crio.sock]
-            IMAGES[(Image Store)]
-            CONTAINERS[(Running Containers)]
-        end
-
-        subgraph Workload Pods
-            APP1[App Container 1]
-            APP2[App Container 2]
-            APP3[App Container 3]
+        subgraph workloads[Workload Pods]
+            APP1[App 1]
+            APP2[App 2]
+            APP3[App 3]
         end
     end
 
     SENSOR --> SOCKET
-    SCANNER --> IMAGES
-    MONITOR --> CONTAINERS
-
-    CONTAINERS -.-> APP1
-    CONTAINERS -.-> APP2
-    CONTAINERS -.-> APP3
+    SENSOR --> IMAGES
+    SOCKET --> workloads
 ```
 
 ### Installation Steps
@@ -297,13 +254,10 @@ apiVersion: qualys.qualys.io/v1alpha1
 kind: QualysContainerSecurity
 metadata:
   name: qualys-container-sensor
-  namespace: qualys-system
+  namespace: qualys
 spec:
   platformConfigRef:
     name: qualys-platform
-  image:
-    repository: qualys/qcs-sensor
-    tag: 1.22.0
   containerRuntime:
     type: auto
   sensorConfig:
@@ -320,49 +274,50 @@ On OpenShift, the operator automatically creates SCCs to grant the required priv
 
 ```mermaid
 flowchart LR
-    subgraph Operator
-        RECONCILE[Reconcile Loop]
+    OP[Operator]
+
+    subgraph sccs[Created SCCs]
+        SCC1[Cloud Agent SCC]
+        SCC2[Sensor SCC]
     end
 
-    subgraph OpenShift API
-        SCC_API[SCC API]
+    subgraph sas[Service Accounts]
+        SA1[cloud-agent-sa]
+        SA2[sensor-sa]
     end
 
-    subgraph Created SCCs
-        CA_SCC[Cloud Agent SCC<br/>- privileged: true<br/>- hostPID: true<br/>- SYS_ADMIN cap]
-        CS_SCC[Container Sensor SCC<br/>- hostNetwork: true<br/>- socket access]
-    end
-
-    subgraph Service Accounts
-        CA_SA[cloud-agent-sa]
-        CS_SA[container-sensor-sa]
-    end
-
-    RECONCILE --> SCC_API
-    SCC_API --> CA_SCC
-    SCC_API --> CS_SCC
-    CA_SCC --> CA_SA
-    CS_SCC --> CS_SA
+    OP --> SCC1
+    OP --> SCC2
+    SCC1 --> SA1
+    SCC2 --> SA2
 ```
+
+**Cloud Agent SCC grants:**
+- `privileged: true`
+- `hostPID: true`
+- `SYS_ADMIN` capability
+
+**Container Sensor SCC grants:**
+- `hostNetwork: true`
+- Container runtime socket access
 
 ## Reconciliation Flow
 
 The operator continuously reconciles the desired state with the actual state:
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Pending: CR Created
-    Pending --> Validating: Reconcile triggered
-    Validating --> WaitingCredentials: PlatformConfig found
-    Validating --> Error: PlatformConfig missing
-    WaitingCredentials --> Progressing: Credentials ready
-    WaitingCredentials --> WaitingCredentials: Credentials not ready
-    Progressing --> Creating: Create resources
-    Creating --> Available: All pods ready
-    Creating --> Degraded: Some pods failing
-    Available --> Progressing: Spec changed
-    Degraded --> Progressing: Issue resolved
-    Error --> Validating: Retry after interval
+flowchart LR
+    A[CR Created] --> B[Validate Config]
+    B --> C{Credentials Ready?}
+    C -->|No| D[Wait]
+    D --> C
+    C -->|Yes| E[Create Resources]
+    E --> F{Pods Ready?}
+    F -->|No| G[Degraded]
+    F -->|Yes| H[Available]
+    G --> E
+    H --> I[Watch for Changes]
+    I --> B
 ```
 
 ## Monitoring Deployment Status
@@ -374,13 +329,13 @@ Check the status of your deployments:
 kubectl get qualysplatformconfig qualys-platform -o yaml
 
 # Cloud Agent status
-kubectl get qualyscloudagent -n qualys-system -o wide
+kubectl get qualyscloudagent -n qualys -o wide
 
 # Container Sensor status
-kubectl get qualyscontainersecurity -n qualys-system -o wide
+kubectl get qualyscontainersecurity -n qualys -o wide
 
 # View pods across all nodes
-kubectl get pods -n qualys-system -o wide
+kubectl get pods -n qualys -o wide
 ```
 
 Example output:
@@ -400,25 +355,18 @@ sequenceDiagram
     participant CA as Cloud Agent
     participant CS as Container Sensor
     participant QP as Qualys Platform
-    participant UI as Qualys Console
 
     loop Host Scanning
         CA->>CA: Scan packages
-        CA->>CA: Scan configurations
         CA->>QP: Upload VM findings
-        CA->>QP: Upload compliance data
     end
 
     loop Container Monitoring
-        CS->>CS: Detect new images
-        CS->>CS: Scan image layers
+        CS->>CS: Scan images
         CS->>QP: Upload vulnerabilities
-        CS->>CS: Monitor containers
-        CS->>QP: Upload runtime events
     end
 
     QP->>QP: Correlate data
-    QP->>UI: Update dashboards
 ```
 
 ## Troubleshooting
@@ -428,25 +376,21 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     START[Pod not starting]
-    CHECK_SCC{SCC created?}
-    CREATE_SCC[Check operator logs<br/>for SCC errors]
-    CHECK_SECRET{Secret exists?}
-    CREATE_SECRET[Create credentials secret]
-    CHECK_PLATFORM{PlatformConfig ready?}
-    FIX_PLATFORM[Fix PlatformConfig]
-    CHECK_RESOURCES{Node resources?}
-    ADJUST[Adjust resource limits]
-    RUNNING[Pod running]
+    A{SCC exists?}
+    B[Check operator logs]
+    C{Secret exists?}
+    D[Create secret]
+    E{Config ready?}
+    F[Fix PlatformConfig]
+    G[Pod running]
 
-    START --> CHECK_SCC
-    CHECK_SCC -->|No| CREATE_SCC
-    CHECK_SCC -->|Yes| CHECK_SECRET
-    CHECK_SECRET -->|No| CREATE_SECRET
-    CHECK_SECRET -->|Yes| CHECK_PLATFORM
-    CHECK_PLATFORM -->|No| FIX_PLATFORM
-    CHECK_PLATFORM -->|Yes| CHECK_RESOURCES
-    CHECK_RESOURCES -->|Insufficient| ADJUST
-    CHECK_RESOURCES -->|OK| RUNNING
+    START --> A
+    A -->|No| B
+    A -->|Yes| C
+    C -->|No| D
+    C -->|Yes| E
+    E -->|No| F
+    E -->|Yes| G
 ```
 
 ### Common Issues
