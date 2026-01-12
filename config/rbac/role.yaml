@@ -11,6 +11,7 @@ rules:
   - nodes
   - secrets
   - serviceaccounts
+  - services
   verbs:
   - create
   - delete
@@ -27,9 +28,22 @@ rules:
   - create
   - patch
 - apiGroups:
+  - admissionregistration.k8s.io
+  resources:
+  - validatingwebhookconfigurations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - apps
   resources:
   - daemonsets
+  - deployments
   verbs:
   - create
   - delete

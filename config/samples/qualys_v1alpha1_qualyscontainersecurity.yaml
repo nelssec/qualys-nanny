@@ -4,39 +4,39 @@ metadata:
   labels:
     app.kubernetes.io/name: qualys-nanny
     app.kubernetes.io/managed-by: kustomize
-  name: qualys-container-sensor
+  name: qualys-container-security
   namespace: qualys
 spec:
   platformConfigRef:
     name: qualys-platform
-  image:
-    repository: qualys/qcs-sensor
-    tag: "1.40.1-0"
-    pullPolicy: IfNotPresent
-  containerRuntime:
-    type: auto
-  sensorConfig:
+  containerSensor:
+    enabled: true
+    image:
+      repository: qualys/qcs-sensor
+      tag: "latest"
+      pullPolicy: IfNotPresent
     mode: general
     k8sMode: true
     scanning:
       enableImageScan: true
       enableContainerScan: true
       scanThreadPoolSize: 2
-      containerLaunchTimeout: "10m"
     storage:
       usePersistentStorage: true
       storageSize: "10Gi"
     logging:
       logLevel: 3
-      logFileSize: "10M"
-      logFilePurgeCount: 5
-  resources:
-    requests:
-      cpu: 250m
-      memory: 512Mi
-    limits:
-      cpu: "1"
-      memory: 1Gi
+  clusterSensor:
+    enabled: true
+    replicas: 1
+  admissionController:
+    enabled: false
+    replicas: 2
+    failurePolicy: Ignore
+  runtimeSensor:
+    enabled: false
+  containerRuntime:
+    type: auto
   scheduling:
     nodeSelector:
       kubernetes.io/os: linux
@@ -46,7 +46,3 @@ spec:
       - operator: Exists
         effect: NoExecute
     priorityClassName: system-node-critical
-  updateStrategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: "25%"

@@ -117,10 +117,10 @@ func BuildCloudAgentConfigMap(name, namespace string, platformConfig *qualysv1al
 	}
 }
 
-func BuildContainerSensorConfigMap(name, namespace string, platformConfig *qualysv1alpha1.QualysPlatformConfig, sensorConfig qualysv1alpha1.SensorConfig) *corev1.ConfigMap {
+func BuildContainerSensorConfigMap(name, namespace string, platformConfig *qualysv1alpha1.QualysPlatformConfig, sensorConfig qualysv1alpha1.ContainerSensorConfig) *corev1.ConfigMap {
 	data := map[string]string{
 		"SERVER_URI": platformConfig.Spec.Platform.ServerUri,
-		"MODE":       sensorConfig.Mode,
+		"MODE":       string(sensorConfig.Mode),
 	}
 
 	if sensorConfig.K8sMode {

@@ -110,9 +110,12 @@ var _ = Describe("QualysContainerSecurity Controller", func() {
 					PlatformConfigRef: qualysv1alpha1.PlatformConfigReference{
 						Name: platformConfigName,
 					},
-					Image: &qualysv1alpha1.ImageSpec{
-						Repository: "qualys/qcs-sensor",
-						Tag:        "latest",
+					ContainerSensor: &qualysv1alpha1.ContainerSensorConfig{
+						Enabled: true,
+						Image: &qualysv1alpha1.ImageSpec{
+							Repository: "qualys/qcs-sensor",
+							Tag:        "latest",
+						},
 					},
 				},
 			}

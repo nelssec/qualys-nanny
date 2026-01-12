@@ -1,21 +1,23 @@
 # Qualys Nanny Operator
 
-A Kubernetes operator for automatically deploying and managing Qualys Cloud Agent and Container Security Sensor on OpenShift clusters.
+A Kubernetes operator for deploying and managing Qualys security agents on OpenShift and Kubernetes clusters.
 
 ## Overview
 
-The Qualys Nanny Operator simplifies the deployment of Qualys security agents across your OpenShift cluster by:
+The Qualys Nanny Operator simplifies deployment of Qualys security agents by:
 
-- Managing Qualys Cloud Agent as a DaemonSet for host-level vulnerability and compliance scanning
-- Managing Qualys Container Security Sensor for container image and runtime scanning
+- Managing Qualys Cloud Agent for host-level vulnerability and compliance scanning
+- Managing Qualys Container Security components (Container Sensor, Cluster Sensor, Admission Controller, Runtime Sensor)
 - Automatically detecting node OS (CoreOS, RHEL, Debian) and selecting appropriate deployment mode
 - Automatically creating required SecurityContextConstraints on OpenShift
 - Supporting both native Kubernetes Secrets and External Secrets Operator for credential management
 - Auto-detecting container runtime (containerd, CRI-O, Docker)
 
-### Deployment Modes
+## Components
 
-The Cloud Agent supports two deployment modes based on the node operating system:
+### QualysCloudAgent
+
+Host-level security agent for vulnerability management and compliance scanning.
 
 | Mode | OS Types | Image | Description |
 |------|----------|-------|-------------|
@@ -24,6 +26,17 @@ The Cloud Agent supports two deployment modes based on the node operating system
 
 Set `deploymentMode: auto` (default) to let the operator detect the appropriate mode.
 
+### QualysContainerSecurity
+
+Container security suite with four deployable components:
+
+| Component | Type | Default | Description |
+|-----------|------|---------|-------------|
+| Container Sensor | DaemonSet | Enabled | Scans container images and running containers for vulnerabilities |
+| Cluster Sensor | Deployment | Enabled | Monitors K8s API for cluster events, network activity, and workload inventory |
+| Admission Controller | Deployment + Webhook | Disabled | Enforces security policies on resource creation/updates |
+| Runtime Sensor | DaemonSet | Disabled | Uses eBPF to track file and process events in containers |
+
 ## Architecture
 
 The operator manages three Custom Resources:
@@ -31,8 +44,8 @@ The operator manages three Custom Resources:
 | CRD | Scope | Purpose |
 |-----|-------|---------|
 | `QualysPlatformConfig` | Cluster | Shared Qualys platform settings and credentials |
-| `QualysCloudAgent` | Namespace | Cloud Agent DaemonSet configuration |
-| `QualysContainerSecurity` | Namespace | Container Security Sensor configuration |
+| `QualysCloudAgent` | Namespace | Cloud Agent DaemonSet for host scanning |
+| `QualysContainerSecurity` | Namespace | Container security components |
 
 ## Prerequisites
 
@@ -46,27 +59,18 @@ The operator manages three Custom Resources:
 ### Option 1: Deploy from Source
 
 ```bash
-# Clone the repository
 git clone https://github.com/nelssec/qualys-nanny.git
 cd qualys-nanny
 
-# Build and push the operator image
 make docker-build docker-push IMG=<your-registry>/qualys-nanny:v0.1.0
-
-# Install CRDs
 make install
-
-# Deploy the operator
 make deploy IMG=<your-registry>/qualys-nanny:v0.1.0
 ```
 
 ### Option 2: Deploy via OLM (OperatorHub)
 
 ```bash
-# Build and push the bundle
 make bundle-build bundle-push BUNDLE_IMG=<your-registry>/qualys-nanny-bundle:v0.1.0
-
-# Run the bundle
 operator-sdk run bundle <your-registry>/qualys-nanny-bundle:v0.1.0
 ```
 
@@ -109,7 +113,7 @@ spec:
       namespace: qualys
 ```
 
-### 4. Deploy Cloud Agent
+### 4. Deploy Cloud Agent (Host Scanning)
 
 ```yaml
 apiVersion: qualys.qualys.io/v1alpha1
@@ -128,22 +132,51 @@ spec:
       - operator: Exists
 ```
 
-### 5. Deploy Container Security Sensor (Optional)
+### 5. Deploy Container Security
 
 ```yaml
 apiVersion: qualys.qualys.io/v1alpha1
 kind: QualysContainerSecurity
 metadata:
-  name: qualys-container-sensor
+  name: qualys-container-security
   namespace: qualys
 spec:
   platformConfigRef:
     name: qualys-platform
-  containerRuntime:
-    type: auto
-  sensorConfig:
+  containerSensor:
+    enabled: true
+    image:
+      repository: qualys/qcs-sensor
+      tag: "latest"
     mode: general
     k8sMode: true
+    scanning:
+      enableImageScan: true
+      enableContainerScan: true
+      scanThreadPoolSize: 2
+    storage:
+      usePersistentStorage: true
+      storageSize: "10Gi"
+  clusterSensor:
+    enabled: true
+    replicas: 1
+  admissionController:
+    enabled: false
+    replicas: 2
+    failurePolicy: Ignore
+  runtimeSensor:
+    enabled: false
+  containerRuntime:
+    type: auto
+  scheduling:
+    nodeSelector:
+      kubernetes.io/os: linux
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: NoExecute
+    priorityClassName: system-node-critical
 ```
 
 ## Configuration Reference
@@ -171,18 +204,63 @@ spec:
 | `spec.scheduling.tolerations` | Pod tolerations | All taints |
 | `spec.scheduling.priorityClassName` | Priority class | `system-node-critical` |
 | `spec.resources` | CPU/memory limits | None |
+| `spec.coreosConfig.cpuLimit` | CPU limit for CoreOS mode | `200m` |
+| `spec.coreosConfig.providerName` | Cloud provider (AWS, AZURE, GCP, etc.) | `AUTO` |
 
 ### QualysContainerSecurity
 
+#### Container Sensor (DaemonSet)
+
 | Field | Description | Default |
 |-------|-------------|---------|
-| `spec.platformConfigRef.name` | Name of QualysPlatformConfig | Required |
-| `spec.image.repository` | Container image | `qualys/qcs-sensor` |
+| `spec.containerSensor.enabled` | Deploy the Container Sensor | `true` |
+| `spec.containerSensor.image.repository` | Container image | `qualys/qcs-sensor` |
+| `spec.containerSensor.mode` | `general`, `registry`, or `cicd` | `general` |
+| `spec.containerSensor.k8sMode` | Enable Kubernetes integration | `true` |
+| `spec.containerSensor.scanning.enableImageScan` | Enable image scanning | `true` |
+| `spec.containerSensor.scanning.enableContainerScan` | Enable container scanning | `true` |
+| `spec.containerSensor.scanning.enableMalwareDetection` | Enable malware detection | `false` |
+| `spec.containerSensor.scanning.enableSecretDetection` | Enable secret detection | `false` |
+| `spec.containerSensor.scanning.scanThreadPoolSize` | Concurrent scan threads | `2` |
+| `spec.containerSensor.storage.usePersistentStorage` | Use persistent storage | `true` |
+| `spec.containerSensor.storage.storageSize` | Persistent volume size | `10Gi` |
+| `spec.containerSensor.logging.logLevel` | Log verbosity (0-5) | `3` |
+
+#### Cluster Sensor (Deployment)
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `spec.clusterSensor.enabled` | Deploy the Cluster Sensor | `true` |
+| `spec.clusterSensor.image.repository` | Container image | `qualys/cluster-sensor` |
+| `spec.clusterSensor.replicas` | Number of replicas | `1` |
+| `spec.clusterSensor.logging.logLevel` | Log verbosity (0-5) | `3` |
+
+#### Admission Controller (Deployment + Webhook)
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `spec.admissionController.enabled` | Deploy the Admission Controller | `false` |
+| `spec.admissionController.image.repository` | Container image | `qualys/admission-controller` |
+| `spec.admissionController.replicas` | Number of replicas | `2` |
+| `spec.admissionController.failurePolicy` | Webhook failure policy (`Fail` or `Ignore`) | `Ignore` |
+| `spec.admissionController.namespaceSelector` | Limit namespaces for admission control | None |
+
+#### Runtime Sensor (DaemonSet with eBPF)
+
+| Field | Description | Default |
+|-------|-------------|---------|
+| `spec.runtimeSensor.enabled` | Deploy the Runtime Sensor | `false` |
+| `spec.runtimeSensor.image.repository` | Container image | `qualys/runtime-sensor` |
+| `spec.runtimeSensor.logging.logLevel` | Log verbosity (0-5) | `3` |
+
+#### Shared Settings
+
+| Field | Description | Default |
+|-------|-------------|---------|
 | `spec.containerRuntime.type` | `auto`, `containerd`, `cri-o`, `docker` | `auto` |
-| `spec.sensorConfig.mode` | `general`, `registry`, `cicd` | `general` |
-| `spec.sensorConfig.k8sMode` | Enable Kubernetes integration | `true` |
-| `spec.sensorConfig.scanning.enableImageScan` | Enable image scanning | `true` |
-| `spec.sensorConfig.scanning.enableContainerScan` | Enable container scanning | `true` |
+| `spec.scheduling.nodeSelector` | Node selector for DaemonSets | `kubernetes.io/os: linux` |
+| `spec.scheduling.tolerations` | Pod tolerations | All taints |
+| `spec.scheduling.priorityClassName` | Priority class | `system-node-critical` |
 
 ## External Secrets Integration
 
@@ -219,51 +297,37 @@ spec:
 
 ## Status and Monitoring
 
-Check deployment status:
-
 ```bash
-# Platform config status
 kubectl get qualysplatformconfig qualys-platform -o yaml
-
-# Cloud Agent status
 kubectl get qualyscloudagent -n qualys
-
-# Container Security status
 kubectl get qualyscontainersecurity -n qualys
-
-# View DaemonSet pods
 kubectl get pods -n qualys -l app.kubernetes.io/managed-by=qualys-nanny
+```
+
+Example output:
+
+```
+NAME                       CONTAINER   CLUSTER   ADMISSION   RUNTIME   AGE
+qualys-container-security  true        true      false       false     2h
 ```
 
 ## Uninstallation
 
 ```bash
-# Delete CRs
 kubectl delete qualyscloudagent -n qualys --all
 kubectl delete qualyscontainersecurity -n qualys --all
 kubectl delete qualysplatformconfig --all
-
-# Uninstall operator
 make undeploy
-
-# Remove CRDs
 make uninstall
 ```
 
 ## Development
 
 ```bash
-# Run locally (outside cluster)
 make install
 make run
-
-# Run tests
 make test
-
-# Generate manifests
 make generate manifests
-
-# Build binary
 make build
 ```
 
