@@ -161,7 +161,7 @@ metadata:
     capabilities: Full Lifecycle
     categories: Security
     containerImage: quay.io/nelssec/qualys-nanny:v0.1.0
-    createdAt: "2026-01-09T22:30:17Z"
+    createdAt: "2026-01-10T00:28:53Z"
     description: Automatically deploy and manage Qualys Cloud Agent and Container
       Security Sensor on OpenShift clusters
     operators.operatorframework.io/builder: operator-sdk-v1.42.0
@@ -384,7 +384,7 @@ spec:
                 - --health-probe-bind-address=:8081
                 command:
                 - /manager
-                image: controller:latest
+                image: quay.io/qualys/qualys-nanny:latest
                 livenessProbe:
                   httpGet:
                     path: /healthz
