@@ -18,6 +18,7 @@ vendor/
 # Test artifacts
 cover.out
 *.coverprofile
+test-data/
 
 # Kubernetes
 Dockerfile.cross
