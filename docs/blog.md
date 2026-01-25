@@ -196,52 +196,123 @@ The Container Sensor supports four privilege modes:
 
 ## RBAC Permissions
 
-### Operator Permissions
+### Operator Manager Permissions
 
-The operator requires these permissions to manage resources:
+The operator manager requires permissions to create and manage the sensor components:
 
-```yaml
-rules:
-- apiGroups: [""]
-  resources: [serviceaccounts, configmaps, secrets, services, namespaces, nodes, pods, endpoints]
-  verbs: [get, list, watch, create, update, patch, delete]
-- apiGroups: [apps]
-  resources: [daemonsets, deployments]
-  verbs: [get, list, watch, create, update, patch, delete]
-- apiGroups: [rbac.authorization.k8s.io]
-  resources: [clusterroles, clusterrolebindings, roles, rolebindings]
-  verbs: [get, list, watch, create, update, patch, delete]
-- apiGroups: [admissionregistration.k8s.io]
-  resources: [validatingwebhookconfigurations]
-  verbs: [get, list, watch, create, update, patch, delete]
-- apiGroups: ["*"]
-  resources: ["*"]
-  verbs: [get, list]
-```
+| API Group | Resources | Verbs | Purpose |
+|-----------|-----------|-------|---------|
+| `""` (core) | configmaps, secrets, serviceaccounts, services | create, delete, get, list, patch, update, watch | Manage sensor configurations and credentials |
+| `""` (core) | namespaces, nodes, pods, endpoints | get, list, watch | Monitor cluster state |
+| `""` (core) | events | create, patch | Emit Kubernetes events |
+| `apps` | daemonsets, deployments, replicasets, statefulsets | create, delete, get, list, patch, update, watch | Deploy sensor workloads |
+| `batch` | jobs, cronjobs | create, delete, get, list, watch | Host scanner jobs |
+| `rbac.authorization.k8s.io` | clusterroles, clusterrolebindings, roles, rolebindings | create, delete, get, list, patch, update, watch | Manage sensor RBAC |
+| `admissionregistration.k8s.io` | validatingwebhookconfigurations | create, delete, get, list, patch, update, watch | Admission controller webhooks |
+| `qualys.io` | qualyscontainersecurities, qualysplatformconfigs | create, delete, get, list, patch, update, watch | Manage custom resources |
+| `*` | `*` | get, list | Cluster-wide read access for inventory |
 
-### Component Permissions
+### Container Sensor Permissions
 
-**Container Sensor:**
-- Runtime socket access (read-only)
-- Host filesystem access (for scanning)
+| API Group | Resources | Verbs | Purpose |
+|-----------|-----------|-------|---------|
+| `""` (core) | nodes, nodes/status | get, list, watch | Node inventory |
+| `""` (core) | pods, pods/status | get, list, watch | Pod/container inventory |
+| `""` (core) | pods/exec | create | Container scanning |
+| `""` (core) | namespaces, services, configmaps, secrets | get, list, watch | Workload context |
+| `""` (core) | replicationcontrollers/status | get, list, watch | Workload status |
+| `apps` | deployments, replicasets, daemonsets, statefulsets (+ /status) | get, list, watch | Workload inventory |
+| `batch` | jobs, cronjobs (+ /status) | get, list, watch | Job inventory |
+| `batch` | jobs | create, delete | Image scanning jobs |
 
-**Cluster Sensor:**
-- Cluster-wide read access to all resources
-- Watch on pods, namespaces, nodes, services
+**Host Access:**
+| Path | Access | Purpose |
+|------|--------|---------|
+| `/var/run/crio/crio.sock` or equivalent | Read | CRI API for image/container inspection |
+| `/var/lib/containers` | Read | Container layer access for scanning |
+| `/etc/os-release` | Read | Host OS detection |
 
-**Admission Controller:**
-- Read access to pods, deployments, daemonsets
-- ValidatingWebhookConfiguration management
+### Cluster Sensor Permissions
+
+| API Group | Resources | Verbs | Purpose |
+|-----------|-----------|-------|---------|
+| `""` (core) | pods, namespaces, nodes, services, serviceaccounts | watch | Real-time workload tracking |
+| `rbac.authorization.k8s.io` | roles, rolebindings, clusterroles, clusterrolebindings | watch | RBAC visibility |
+| `discovery.k8s.io` | endpointslices | watch | Service discovery |
+| `networking.k8s.io` | ingresses | watch | Ingress inventory |
+| `*` | `*` | get, list | Full cluster inventory |
+
+**OpenShift Additional:**
+| API Group | Resources | Verbs | Purpose |
+|-----------|-----------|-------|---------|
+| `security.openshift.io` | securitycontextconstraints | create, get, list, watch, update, patch, delete | SCC management |
+
+### Admission Controller Permissions
+
+| API Group | Resources | Verbs | Purpose |
+|-----------|-----------|-------|---------|
+| `""` (core) | pods, namespaces | get, list, watch | Pod admission decisions |
+| `apps` | deployments, daemonsets, replicasets, statefulsets | get, list, watch | Workload context |
+| `batch` | jobs, cronjobs | get, list, watch | Job context |
+
+### Runtime Sensor Permissions
+
+| API Group | Resources | Verbs | Purpose |
+|-----------|-----------|-------|---------|
+| `""` (core) | nodes, pods | get, list, watch | Container/host correlation |
+
+**Host Access:**
+| Path | Access | Purpose |
+|------|--------|---------|
+| `/sys/kernel/debug` | Read | eBPF program loading |
+| `/proc` | Read | Process inspection |
+| Host network namespace | Full | Network visibility |
+| Host PID namespace | Full | Process visibility |
+
+**Note:** Runtime Sensor requires `privileged: true` for eBPF kernel access.
 
 ## OpenShift Security Context Constraints
 
-On OpenShift, the operator creates SCCs automatically:
+On OpenShift, the operator creates SCCs automatically based on the privilege mode:
 
-| Component | SCC Name | Privileges |
-|-----------|----------|------------|
-| Container Sensor | `{name}-container-scc` | hostNetwork, hostPID, capabilities |
-| Cluster Sensor | `{name}-cluster-scc` | Non-privileged (user 555) |
-| Runtime Sensor | `{name}-runtime-scc` | Privileged (eBPF required) |
+### Container Sensor SCC (`{name}-container-scc`)
+
+| Setting | Unprivileged | Minimal | Standard | Privileged |
+|---------|--------------|---------|----------|------------|
+| `allowPrivilegedContainer` | false | false | false | false |
+| `allowHostNetwork` | false | true | true | true |
+| `allowHostPID` | false | true | true | true |
+| `allowHostPorts` | false | true | true | true |
+| `runAsUser` | MustRunAs (65534) | RunAsAny | RunAsAny | RunAsAny |
+| `seLinuxContext` | MustRunAs | RunAsAny | RunAsAny | RunAsAny |
+| `fsGroup` | MustRunAs | RunAsAny | RunAsAny | RunAsAny |
+| `allowedCapabilities` | [] | [SYS_PTRACE] | [SYS_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_READ_SEARCH] | [*] |
+| `volumes` | configMap, emptyDir, secret, persistentVolumeClaim | + hostPath | + hostPath | + hostPath |
+
+### Cluster Sensor SCC (`{name}-cluster-scc`)
+
+| Setting | Value |
+|---------|-------|
+| `allowPrivilegedContainer` | false |
+| `allowHostNetwork` | true |
+| `allowHostPID` | false |
+| `runAsUser` | MustRunAs (555) |
+| `seLinuxContext` | MustRunAs |
+| `volumes` | configMap, emptyDir, secret |
+
+### Runtime Sensor SCC (`{name}-runtime-scc`)
+
+| Setting | Value |
+|---------|-------|
+| `allowPrivilegedContainer` | true |
+| `allowHostNetwork` | true |
+| `allowHostPID` | true |
+| `runAsUser` | RunAsAny |
+| `seLinuxContext` | RunAsAny |
+| `allowedCapabilities` | [*] |
+| `volumes` | configMap, emptyDir, secret, hostPath |
+
+**Note:** Runtime Sensor requires privileged mode for eBPF kernel access. This is the only component that truly requires `privileged: true`.
 
 ## Cloud Provider Configuration
 
