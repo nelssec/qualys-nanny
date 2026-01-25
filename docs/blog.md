@@ -82,94 +82,86 @@ Uses eBPF for kernel-level visibility into container behavior.
 ## Installation
 
 ### Prerequisites
-- Kubernetes 1.25+ or OpenShift 4.12+
-- kubectl or oc CLI
-- Qualys subscription with Container Security module
-- CUSTOMER_ID and ACTIVATION_ID from Qualys portal
 
-### Option A: Install from OperatorHub (Recommended)
+| Requirement | Details |
+|-------------|---------|
+| Kubernetes | 1.25+ or OpenShift 4.12+ |
+| CLI Access | `kubectl` or `oc` with cluster-admin privileges |
+| Qualys Subscription | Container Security module enabled |
+| Credentials | `CUSTOMER_ID` and `ACTIVATION_ID` from Qualys portal |
 
-The Qualys Nanny Operator is available on [OperatorHub.io](https://operatorhub.io/operator/qualys-nanny).
+To get credentials: Qualys Portal → Container Security → Sensors → New Sensor
 
-**OpenShift Console:**
-1. Navigate to **Operators → OperatorHub**
-2. Search for "**Qualys Nanny**"
-3. Click **Install**
-4. Select the target namespace and approval strategy
-5. Click **Install** to deploy the operator
+### Step 1: Install the Operator
 
-**Kubernetes with OLM:**
+Choose one installation method:
 
-First, install OLM if not already present:
+**OperatorHub (OpenShift)**
 ```bash
+oc apply -f https://operatorhub.io/install/qualys-nanny.yaml
+oc get csv -n operators -w  # Wait for Succeeded phase
+```
+
+**OperatorHub (Kubernetes)**
+```bash
+# Install OLM if not present
 curl -sL https://github.com/operator-framework/operator-lifecycle-manager/releases/download/v0.28.0/install.sh | bash -s v0.28.0
-```
 
-Then install the operator:
-```bash
+# Install operator
 kubectl create -f https://operatorhub.io/install/qualys-nanny.yaml
-kubectl get csv -n operators
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded csv -n operators -l operators.coreos.com/qualys-nanny.operators --timeout=120s
 ```
 
-Wait for the operator to be ready:
-```bash
-kubectl wait --for=jsonpath='{.status.phase}'=Succeeded csv -n operators -l operators.coreos.com/qualys-nanny.operators
-```
-
-### Option B: Install from Manifests
-
-For environments without OLM, install directly from manifests:
-
+**Direct Manifests (no OLM)**
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/nelssec/qualys-nanny/main/dist/install.yaml
 ```
 
-Or clone the repository and apply locally:
-```bash
-git clone https://github.com/nelssec/qualys-nanny.git
-cd qualys-nanny
-kubectl apply -f dist/install.yaml
-```
-
-This creates:
-- `qualys` namespace
-- CRDs for QualysPlatformConfig and QualysContainerSecurity
-- Operator deployment with required RBAC
-
-### Step 1: Create Credentials
+### Step 2: Create Credentials Secret
 
 ```bash
+kubectl create namespace qualys --dry-run=client -o yaml | kubectl apply -f -
+
 kubectl create secret generic qualys-credentials \
   --namespace qualys \
   --from-literal=CUSTOMER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
   --from-literal=ACTIVATION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-### Step 2: Configure Platform URLs
+### Step 3: Configure Platform Connection
 
-Create a QualysPlatformConfig with your regional URLs:
+Determine your regional URLs from https://www.qualys.com/platform-identification:
 
-```yaml
+| Region | Server URI | Gateway URL |
+|--------|------------|-------------|
+| US1 | `https://cmsqagpublic.qg1.apps.qualys.com/ContainerSensor` | `https://gateway.qg1.apps.qualys.com` |
+| US2 | `https://cmsqagpublic.qg2.apps.qualys.com/ContainerSensor` | `https://gateway.qg2.apps.qualys.com` |
+| US3 | `https://cmsqagpublic.qg3.apps.qualys.com/ContainerSensor` | `https://gateway.qg3.apps.qualys.com` |
+| EU1 | `https://cmsqagpublic.qg1.apps.qualys.eu/ContainerSensor` | `https://gateway.qg1.apps.qualys.eu` |
+| CA1 | `https://cmsqagpublic.qg1.apps.qualys.ca/ContainerSensor` | `https://gateway.qg1.apps.qualys.ca` |
+
+```bash
+cat <<EOF | kubectl apply -f -
 apiVersion: qualys.io/v1
 kind: QualysPlatformConfig
 metadata:
   name: qualys-platform
 spec:
   platform:
-    serverUri: "https://cmsqagpublic.qg1.apps.qualys.ca/ContainerSensor"
-    gatewayUrl: "https://gateway.qg1.apps.qualys.ca"
+    serverUri: "https://cmsqagpublic.qg1.apps.qualys.com/ContainerSensor"
+    gatewayUrl: "https://gateway.qg1.apps.qualys.com"
   credentials:
     sourceType: secret
     secretRef:
       name: qualys-credentials
       namespace: qualys
+EOF
 ```
 
-Find your regional URLs: https://www.qualys.com/platform-identification
+### Step 4: Deploy Sensors
 
-### Step 3: Deploy Container Security
-
-```yaml
+```bash
+cat <<EOF | kubectl apply -f -
 apiVersion: qualys.io/v1
 kind: QualysContainerSecurity
 metadata:
@@ -185,6 +177,7 @@ spec:
       enableImageScan: true
       enableContainerScan: true
       enableScaScan: true
+      scanningPolicy: DynamicWithStaticScanningAsFallback
   clusterSensor:
     enabled: true
     cloudProvider: AWS
@@ -196,6 +189,31 @@ spec:
     enabled: false
   runtimeSensor:
     enabled: false
+EOF
+```
+
+### Step 5: Verify Deployment
+
+```bash
+# Operator status
+kubectl get pods -n qualys -l control-plane=controller-manager
+
+# CR status
+kubectl get qualysplatformconfig
+kubectl get qualyscontainersecurity -n qualys
+
+# Sensor pods
+kubectl get pods -n qualys
+kubectl get daemonset,deployment -n qualys
+
+# Sensor connectivity (should show "Connected to server")
+kubectl logs -n qualys -l app.kubernetes.io/component=container-sensor --tail=20 | grep -i connect
+```
+
+Expected output:
+```
+NAME                        CONTAINER   CLUSTER   ADMISSION   RUNTIME   AGE
+qualys-container-security   true        true      false       false     2m
 ```
 
 ## Privilege Modes

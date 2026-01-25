@@ -15,62 +15,75 @@ Kubernetes operator for deploying and managing Qualys security components on Ope
 | Runtime Sensor | DaemonSet | eBPF-based file and process event tracking |
 | Cloud Agent | DaemonSet | Host-level vulnerability and compliance scanning |
 
-## Quick Start
+## Prerequisites
 
-### Option A: Install from OperatorHub (Recommended)
+- Kubernetes 1.25+ or OpenShift 4.12+
+- `kubectl` or `oc` CLI configured with cluster-admin access
+- Qualys subscription with Container Security module
+- `CUSTOMER_ID` and `ACTIVATION_ID` from Qualys portal (Container Security → Sensors → New Sensor)
 
-**OpenShift:**
-1. Navigate to **Operators → OperatorHub** in the OpenShift Console
-2. Search for "**Qualys Nanny**"
-3. Click **Install** and follow the prompts
+## Installation
 
-**Kubernetes with OLM:**
+### Step 1: Install the Operator
+
+**Option A: OperatorHub (OpenShift)**
 ```bash
-kubectl create -f https://operatorhub.io/install/qualys-nanny.yaml
-kubectl get csv -n operators
+# Via OpenShift Console: Operators → OperatorHub → Search "Qualys Nanny" → Install
+# Or via CLI:
+oc apply -f https://operatorhub.io/install/qualys-nanny.yaml
 ```
 
-### Option B: Install from Manifests
+**Option A: OperatorHub (Kubernetes with OLM)**
+```bash
+# Install OLM first if not present
+curl -sL https://github.com/operator-framework/operator-lifecycle-manager/releases/download/v0.28.0/install.sh | bash -s v0.28.0
 
+# Install the operator
+kubectl create -f https://operatorhub.io/install/qualys-nanny.yaml
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded csv -n operators -l operators.coreos.com/qualys-nanny.operators --timeout=120s
+```
+
+**Option B: Direct Manifests (no OLM)**
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/nelssec/qualys-nanny/main/dist/install.yaml
 ```
 
-Or clone and apply locally:
-```bash
-kubectl apply -f dist/install.yaml
-```
-
-### 1. Create Credentials Secret
+### Step 2: Create Credentials Secret
 
 ```bash
+kubectl create namespace qualys --dry-run=client -o yaml | kubectl apply -f -
 kubectl create secret generic qualys-credentials \
   --namespace qualys \
-  --from-literal=CUSTOMER_ID=<your-customer-id> \
-  --from-literal=ACTIVATION_ID=<your-activation-id>
+  --from-literal=CUSTOMER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
+  --from-literal=ACTIVATION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-### 2. Create Platform Configuration
+### Step 3: Create Platform Configuration
 
-```yaml
+Get your regional URLs from https://www.qualys.com/platform-identification
+
+```bash
+cat <<EOF | kubectl apply -f -
 apiVersion: qualys.io/v1
 kind: QualysPlatformConfig
 metadata:
   name: qualys-platform
 spec:
   platform:
-    serverUri: "https://cmsqagpublic.qg1.apps.qualys.ca/ContainerSensor"
-    gatewayUrl: "https://gateway.qg1.apps.qualys.ca"
+    serverUri: "https://cmsqagpublic.qg1.apps.qualys.com/ContainerSensor"  # US1 - change for your region
+    gatewayUrl: "https://gateway.qg1.apps.qualys.com"                       # US1 - change for your region
   credentials:
     sourceType: secret
     secretRef:
       name: qualys-credentials
       namespace: qualys
+EOF
 ```
 
-### 3. Deploy Container Security
+### Step 4: Deploy Sensors
 
-```yaml
+```bash
+cat <<EOF | kubectl apply -f -
 apiVersion: qualys.io/v1
 kind: QualysContainerSecurity
 metadata:
@@ -81,15 +94,31 @@ spec:
     name: qualys-platform
   containerSensor:
     enabled: true
-    privilegeMode: standard
+    privilegeMode: standard    # unprivileged | minimal | standard | privileged
     scanning:
       enableImageScan: true
       enableContainerScan: true
       enableScaScan: true
   clusterSensor:
     enabled: true
-    cloudProvider: AWS
+    cloudProvider: AWS         # AWS | AZURE | GCP | OCI | SELF_MANAGED_K8S
     clusterName: my-cluster
+EOF
+```
+
+### Step 5: Verify Deployment
+
+```bash
+# Check operator
+kubectl get pods -n qualys -l control-plane=controller-manager
+
+# Check sensors
+kubectl get qualyscontainersecurity -n qualys
+kubectl get pods -n qualys
+kubectl get daemonset,deployment -n qualys
+
+# Check sensor logs
+kubectl logs -n qualys -l app.kubernetes.io/component=container-sensor --tail=50
 ```
 
 ## Privilege Modes
