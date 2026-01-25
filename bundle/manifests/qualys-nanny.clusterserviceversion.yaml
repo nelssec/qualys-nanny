@@ -707,7 +707,7 @@ spec:
                 - --health-probe-bind-address=:8081
                 command:
                 - /manager
-                image: controller:latest
+                image: quay.io/nelssec/qualys-nanny:v0.1.0
                 livenessProbe:
                   httpGet:
                     path: /healthz
