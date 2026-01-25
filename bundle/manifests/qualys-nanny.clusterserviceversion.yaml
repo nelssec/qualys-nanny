@@ -447,11 +447,13 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
-    - displayName: Qualys Container Security
+    - description: Deploys and manages Qualys security sensors including Container Sensor, Cluster Sensor, Admission Controller, and Runtime Sensor for vulnerability scanning and compliance monitoring.
+      displayName: Qualys Container Security
       kind: QualysContainerSecurity
       name: qualyscontainersecurities.qualys.io
       version: v1
-    - displayName: Qualys Platform Config
+    - description: Configures Qualys platform connection settings including server URLs, gateway endpoints, and credential references for authenticating with Qualys Cloud Platform.
+      displayName: Qualys Platform Config
       kind: QualysPlatformConfig
       name: qualysplatformconfigs.qualys.io
       version: v1
