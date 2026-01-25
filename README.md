@@ -127,12 +127,45 @@ The Container Sensor supports four privilege modes to balance security requireme
 
 | Mode | Runs As | Capabilities | Features |
 |------|---------|--------------|----------|
-| `unprivileged` | UID 65534 | None | Image scanning only |
+| `unprivileged` | UID 65534 | None | ❌ Not supported (sensor requires root) |
 | `minimal` | Root | SYS_PTRACE | Image + container scanning |
-| `standard` | Root | SYS_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_READ_SEARCH | All features (recommended) |
+| `standard` | Root | SYS_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_READ_SEARCH | All features + malware detection |
 | `privileged` | Root | Full privileged | All features + Runtime Sensor |
 
-**Note:** The Container Sensor does NOT require `privileged: true`. Use `standard` mode for full functionality. Only the Runtime Sensor (eBPF) requires privileged mode.
+**Note:** The Container Sensor does NOT require `privileged: true`. Use `minimal` mode for basic scanning or `standard` mode for full functionality including malware detection. Only the Runtime Sensor (eBPF) requires privileged mode.
+
+### Minimum Privilege Configuration (Recommended)
+
+For environments requiring minimum privileges, use `minimal` mode:
+
+```yaml
+spec:
+  containerSensor:
+    privilegeMode: minimal
+    scanning:
+      scanningPolicy: StaticScanningOnly  # or DynamicScanningOnly for CRI-O 1.31+
+```
+
+This runs with:
+- `privileged: false`
+- `runAsUser: 0` (root required by sensor binary)
+- Only `SYS_PTRACE` capability
+- Read-only access to container storage
+
+## CRI-O Compatibility
+
+> ⚠️ **Important**: Static scanning has known compatibility issues with newer CRI-O versions.
+
+| CRI-O Version | OpenShift | Static Scanning | Dynamic Scanning |
+|---------------|-----------|-----------------|------------------|
+| 1.30.x | 4.17.x | ✅ Works | ✅ Works |
+| 1.31.x | 4.18.x | ❌ Fails* | ✅ Works |
+
+*qscanner 4.7.0 is incompatible with CRI-O 1.31's new `layers.json` format. Error: `InvalidStorageDriver:10062`
+
+**Workaround for CRI-O 1.31+**: Use `scanningPolicy: DynamicScanningOnly`
+
+For detailed compatibility information, see [docs/compatibility-overview.md](docs/compatibility-overview.md).
 
 ## Sample Configurations
 
@@ -243,6 +276,11 @@ make docker-build IMG=<your-registry>/qualys-nanny:latest
 make docker-push IMG=<your-registry>/qualys-nanny:latest
 make build-installer IMG=<your-registry>/qualys-nanny:latest
 ```
+
+## Documentation
+
+- [Compatibility Overview](docs/compatibility-overview.md) - Detailed privilege modes, CRI-O compatibility, and troubleshooting
+- [CRI-O 1.31 Analysis](docs/qscanner-crio-131-compatibility.md) - Technical analysis of qscanner compatibility issues
 
 ## License
 

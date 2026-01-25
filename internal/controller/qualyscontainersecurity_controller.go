@@ -781,7 +781,7 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 	runtimeName := getRuntimeName(rt)
 
 	args := buildContainerSensorArgs(cfg, runtimeName)
-	envVars := buildContainerSensorEnvVars(secretName, platformConfig.Spec.Platform.ServerUri)
+	envVars := buildContainerSensorEnvVars(secretName, platformConfig.Spec.Platform.ServerUri, cfg)
 	volumeMounts, volumes := buildContainerSensorVolumes(socketPath, rt, cfg.PrivilegeMode)
 
 	var resourceReqs corev1.ResourceRequirements
@@ -865,6 +865,7 @@ func buildContainerSensorSecurityContext(cfg *qualysv1.ContainerSensorConfig) *c
 			SeccompProfile:           seccompProfile,
 			Capabilities: &corev1.Capabilities{
 				Drop: []corev1.Capability{"ALL"},
+				Add:  []corev1.Capability{"DAC_READ_SEARCH"},
 			},
 		}
 
@@ -926,7 +927,9 @@ func buildContainerSensorPodSecurityContext(cfg *qualysv1.ContainerSensorConfig,
 			socketGID = &defaultGID
 		}
 		psc.SupplementalGroups = []int64{*socketGID}
-		psc.FSGroup = socketGID
+		if *socketGID != 0 {
+			psc.FSGroup = socketGID
+		}
 
 		psc.SeccompProfile = &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
@@ -1548,8 +1551,8 @@ func buildContainerSensorArgs(cfg qualysv1.ContainerSensorConfig, runtimeName st
 	return args
 }
 
-func buildContainerSensorEnvVars(secretName, serverUri string) []corev1.EnvVar {
-	return []corev1.EnvVar{
+func buildContainerSensorEnvVars(secretName, serverUri string, cfg qualysv1.ContainerSensorConfig) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{
 		{Name: "CUSTOMERID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "CUSTOMER_ID"}}},
 		{Name: "ACTIVATIONID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "ACTIVATION_ID"}}},
 		{Name: "POD_URL", Value: serverUri},
@@ -1559,6 +1562,17 @@ func buildContainerSensorEnvVars(secretName, serverUri string) []corev1.EnvVar {
 		{Name: "QUALYS_SENSOR_HOST_IP", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.hostIP"}}},
 		{Name: "HOME", Value: "/usr/local/qualys/qpa/data"},
 	}
+
+	if cfg.Scanning != nil && cfg.Scanning.ImageScanDelaySeconds > 0 {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "QUALYS_IMAGE_SCAN_DELAY_SECONDS",
+			Value: fmt.Sprintf("%d", cfg.Scanning.ImageScanDelaySeconds),
+		})
+	}
+
+	envVars = append(envVars, cfg.ExtraEnv...)
+
+	return envVars
 }
 
 func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime, privilegeMode qualysv1.PrivilegeMode) ([]corev1.VolumeMount, []corev1.Volume) {
@@ -1579,6 +1593,16 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "sensor-data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		}
+		if rt == platform.RuntimeCRIO {
+			volumeMounts = append(volumeMounts,
+				corev1.VolumeMount{Name: "container-storage", MountPath: "/var/lib/containers/storage", ReadOnly: true},
+				corev1.VolumeMount{Name: "storage-config-volume", MountPath: "/etc/containers/storage.conf", ReadOnly: true},
+			)
+			volumes = append(volumes,
+				corev1.Volume{Name: "container-storage", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/lib/containers/storage", Type: &directory}}},
+				corev1.Volume{Name: "storage-config-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/containers/storage.conf", Type: &fileType}}},
+			)
+		}
 		return volumeMounts, volumes
 
 	case qualysv1.PrivilegeModeMinimal:
@@ -1593,6 +1617,16 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "host-root", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/", Type: &directory}}},
 			{Name: "sensor-data", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}},
 			{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		}
+		if rt == platform.RuntimeCRIO {
+			volumeMounts = append(volumeMounts,
+				corev1.VolumeMount{Name: "container-storage", MountPath: "/var/lib/containers/storage", ReadOnly: true},
+				corev1.VolumeMount{Name: "storage-config-volume", MountPath: "/etc/containers/storage.conf", ReadOnly: true},
+			)
+			volumes = append(volumes,
+				corev1.Volume{Name: "container-storage", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/lib/containers/storage"}}},
+				corev1.Volume{Name: "storage-config-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/containers/storage.conf", Type: &fileType}}},
+			)
 		}
 		return volumeMounts, volumes
 

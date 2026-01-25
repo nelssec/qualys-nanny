@@ -107,6 +107,8 @@ type ContainerSensorConfig struct {
 	UpdateStrategy *UpdateStrategyConfig `json:"updateStrategy,omitempty"`
 
 	ExtraArgs []string `json:"extraArgs,omitempty"`
+
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=AWS;AZURE;GCP;OCI;SELF_MANAGED_K8S
@@ -249,6 +251,11 @@ type ScanningConfig struct {
 
 	// +kubebuilder:default="10m"
 	ContainerLaunchTimeout string `json:"containerLaunchTimeout,omitempty"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=300
+	// +kubebuilder:default=0
+	ImageScanDelaySeconds int `json:"imageScanDelaySeconds,omitempty"`
 }
 
 type StorageConfig struct {

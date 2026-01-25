@@ -115,7 +115,7 @@ func BuildContainerSensorSCCWithPrivilegeMode(name, namespace, serviceAccountNam
 	switch privilegeMode {
 	case qualysv1.PrivilegeModeUnprivileged:
 		scc.SetAnnotations(map[string]string{
-			"kubernetes.io/description": "SCC for Qualys Container Sensor (unprivileged) - image scanning only via CRI API",
+			"kubernetes.io/description": "SCC for Qualys Container Sensor (unprivileged) - image scanning via CRI API and static scanning with DAC_READ_SEARCH",
 		})
 		scc.Object["allowHostDirVolumePlugin"] = true
 		scc.Object["allowHostIPC"] = false
@@ -124,13 +124,10 @@ func BuildContainerSensorSCCWithPrivilegeMode(name, namespace, serviceAccountNam
 		scc.Object["allowHostPorts"] = false
 		scc.Object["allowPrivilegeEscalation"] = false
 		scc.Object["allowPrivilegedContainer"] = false
-		scc.Object["allowedCapabilities"] = []interface{}{}
+		scc.Object["allowedCapabilities"] = []interface{}{"DAC_READ_SEARCH"}
 		scc.Object["defaultAddCapabilities"] = []interface{}{}
 		scc.Object["fsGroup"] = map[string]interface{}{
-			"type": "MustRunAs",
-			"ranges": []interface{}{
-				map[string]interface{}{"min": int64(1), "max": int64(65535)},
-			},
+			"type": "RunAsAny",
 		}
 		scc.Object["groups"] = []interface{}{}
 		scc.Object["priority"] = nil
@@ -144,6 +141,9 @@ func BuildContainerSensorSCCWithPrivilegeMode(name, namespace, serviceAccountNam
 		}
 		scc.Object["supplementalGroups"] = map[string]interface{}{
 			"type": "RunAsAny",
+		}
+		scc.Object["seccompProfiles"] = []interface{}{
+			"runtime/default",
 		}
 		scc.Object["volumes"] = []interface{}{
 			"configMap",
@@ -182,6 +182,9 @@ func BuildContainerSensorSCCWithPrivilegeMode(name, namespace, serviceAccountNam
 		}
 		scc.Object["supplementalGroups"] = map[string]interface{}{
 			"type": "RunAsAny",
+		}
+		scc.Object["seccompProfiles"] = []interface{}{
+			"runtime/default",
 		}
 		scc.Object["volumes"] = []interface{}{
 			"configMap",
@@ -226,6 +229,10 @@ func BuildContainerSensorSCCWithPrivilegeMode(name, namespace, serviceAccountNam
 		}
 		scc.Object["supplementalGroups"] = map[string]interface{}{
 			"type": "RunAsAny",
+		}
+		scc.Object["seccompProfiles"] = []interface{}{
+			"runtime/default",
+			"*",
 		}
 		scc.Object["volumes"] = []interface{}{
 			"configMap",
