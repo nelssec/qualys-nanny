@@ -1,6 +1,9 @@
-## Append samples of your project ##
+## Qualys Operator Sample Configurations ##
 resources:
-- qualys_v1alpha1_qualysplatformconfig.yaml
-- qualys_v1alpha1_qualyscloudagent.yaml
-- qualys_v1alpha1_qualyscontainersecurity.yaml
+- qualys_operator_platformconfig.yaml
+- qualys_operator_containersecurity_standard.yaml
+- qualys_operator_containersecurity_recommended.yaml
+- qualys_operator_containersecurity_privileged.yaml
+- qualys_operator_containersecurity_unprivileged.yaml
+- qualys_operator_containersecurity_minimal.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

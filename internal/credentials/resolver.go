@@ -24,7 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	qualysv1alpha1 "github.com/nelssec/qualys-nanny/api/v1alpha1"
+	qualysv1 "github.com/nelssec/qualys-nanny/api/v1"
 )
 
 const (
@@ -46,18 +46,18 @@ func NewResolver(c client.Client) *Resolver {
 	return &Resolver{client: c}
 }
 
-func (r *Resolver) Resolve(ctx context.Context, config *qualysv1alpha1.QualysPlatformConfig) (*Credentials, error) {
+func (r *Resolver) Resolve(ctx context.Context, config *qualysv1.QualysPlatformConfig) (*Credentials, error) {
 	switch config.Spec.Credentials.SourceType {
-	case qualysv1alpha1.CredentialSourceSecret:
+	case qualysv1.CredentialSourceSecret:
 		return r.resolveFromSecret(ctx, config.Spec.Credentials.SecretRef)
-	case qualysv1alpha1.CredentialSourceExternalSecret:
+	case qualysv1.CredentialSourceExternalSecret:
 		return r.resolveFromExternalSecret(ctx, config.Spec.Credentials.ExternalSecretRef)
 	default:
 		return nil, fmt.Errorf("unknown credential source type: %s", config.Spec.Credentials.SourceType)
 	}
 }
 
-func (r *Resolver) resolveFromSecret(ctx context.Context, ref *qualysv1alpha1.SecretReference) (*Credentials, error) {
+func (r *Resolver) resolveFromSecret(ctx context.Context, ref *qualysv1.SecretReference) (*Credentials, error) {
 	if ref == nil {
 		return nil, fmt.Errorf("secret reference is nil")
 	}
@@ -88,7 +88,7 @@ func (r *Resolver) resolveFromSecret(ctx context.Context, ref *qualysv1alpha1.Se
 	}, nil
 }
 
-func (r *Resolver) resolveFromExternalSecret(ctx context.Context, ref *qualysv1alpha1.ExternalSecretReference) (*Credentials, error) {
+func (r *Resolver) resolveFromExternalSecret(ctx context.Context, ref *qualysv1.ExternalSecretReference) (*Credentials, error) {
 	if ref == nil {
 		return nil, fmt.Errorf("external secret reference is nil")
 	}
@@ -119,18 +119,18 @@ func (r *Resolver) resolveFromExternalSecret(ctx context.Context, ref *qualysv1a
 	}, nil
 }
 
-func (r *Resolver) GetSecretRef(config *qualysv1alpha1.QualysPlatformConfig) (*qualysv1alpha1.SecretReference, error) {
+func (r *Resolver) GetSecretRef(config *qualysv1.QualysPlatformConfig) (*qualysv1.SecretReference, error) {
 	switch config.Spec.Credentials.SourceType {
-	case qualysv1alpha1.CredentialSourceSecret:
+	case qualysv1.CredentialSourceSecret:
 		if config.Spec.Credentials.SecretRef == nil {
 			return nil, fmt.Errorf("secret reference is nil")
 		}
 		return config.Spec.Credentials.SecretRef, nil
-	case qualysv1alpha1.CredentialSourceExternalSecret:
+	case qualysv1.CredentialSourceExternalSecret:
 		if config.Spec.Credentials.ExternalSecretRef == nil {
 			return nil, fmt.Errorf("external secret reference is nil")
 		}
-		return &qualysv1alpha1.SecretReference{
+		return &qualysv1.SecretReference{
 			Name:      config.Spec.Credentials.ExternalSecretRef.Name,
 			Namespace: config.Spec.Credentials.ExternalSecretRef.Namespace,
 		}, nil

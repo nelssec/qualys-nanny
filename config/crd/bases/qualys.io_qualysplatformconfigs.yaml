@@ -1,12 +1,12 @@
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  creationTimestamp: null
-  name: qualysplatformconfigs.qualys.qualys.io
+  name: qualysplatformconfigs.qualys.io
 spec:
-  group: qualys.qualys.io
+  group: qualys.io
   names:
     kind: QualysPlatformConfig
     listKind: QualysPlatformConfigList
@@ -27,12 +27,9 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v1alpha1
+    name: v1
     schema:
       openAPIV3Schema:
-        description: |-
-          QualysPlatformConfig is the Schema for the qualysplatformconfigs API.
-          It provides cluster-wide Qualys platform configuration including credentials.
         properties:
           apiVersion:
             description: |-
@@ -52,15 +49,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: QualysPlatformConfigSpec defines the desired state of QualysPlatformConfig.
             properties:
               credentials:
-                description: Credentials contains credential source configuration
                 properties:
                   externalSecretRef:
-                    description: |-
-                      ExternalSecretRef references an External Secrets configuration
-                      Required when sourceType is "externalSecret"
                     properties:
                       keyMappings:
                         properties:
@@ -96,10 +88,6 @@ spec:
                     - secretStoreRef
                     type: object
                   secretRef:
-                    description: |-
-                      SecretRef references a Kubernetes Secret containing credentials
-                      Required when sourceType is "secret"
-                      The Secret must contain ACTIVATION_ID and CUSTOMER_ID keys
                     properties:
                       name:
                         type: string
@@ -117,16 +105,16 @@ spec:
                     - enum:
                       - secret
                       - externalSecret
-                    description: SourceType specifies the credential source type
                     type: string
                 required:
                 - sourceType
                 type: object
               platform:
-                description: Platform contains Qualys platform connection settings
                 properties:
+                  gatewayUrl:
+                    pattern: ^https://.*
+                    type: string
                   proxy:
-                    description: Proxy contains optional proxy configuration
                     properties:
                       caCertBundle:
                         type: string
@@ -143,9 +131,6 @@ spec:
                         type: string
                     type: object
                   serverUri:
-                    description: |-
-                      ServerUri is the Qualys platform URL
-                      Example: https://qagpublic.qg2.apps.qualys.com/CloudAgent/
                     pattern: ^https://.*
                     type: string
                 required:
@@ -156,12 +141,8 @@ spec:
             - platform
             type: object
           status:
-            description: QualysPlatformConfigStatus defines the observed state of
-              QualysPlatformConfig.
             properties:
               conditions:
-                description: Conditions represent the latest available observations
-                  of the resource's state
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -218,15 +199,11 @@ spec:
                   type: object
                 type: array
               credentialSource:
-                description: CredentialSource describes the resolved credential source
                 type: string
               lastValidated:
-                description: LastValidated is the timestamp of the last successful
-                  credential validation
                 format: date-time
                 type: string
               observedGeneration:
-                description: ObservedGeneration is the most recent generation observed
                 format: int64
                 type: integer
             type: object
@@ -235,9 +212,3 @@ spec:
     storage: true
     subresources:
       status: {}
-status:
-  acceptedNames:
-    kind: ""
-    plural: ""
-  conditions: null
-  storedVersions: null

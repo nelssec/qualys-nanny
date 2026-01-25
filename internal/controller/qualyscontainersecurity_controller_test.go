@@ -28,7 +28,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	qualysv1alpha1 "github.com/nelssec/qualys-nanny/api/v1alpha1"
+	qualysv1 "github.com/nelssec/qualys-nanny/api/v1"
 )
 
 var _ = Describe("QualysContainerSecurity Controller", func() {
@@ -66,24 +66,24 @@ var _ = Describe("QualysContainerSecurity Controller", func() {
 			}
 
 			By("creating the QualysPlatformConfig")
-			platformConfig := &qualysv1alpha1.QualysPlatformConfig{
+			platformConfig := &qualysv1.QualysPlatformConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: platformConfigName,
 				},
-				Spec: qualysv1alpha1.QualysPlatformConfigSpec{
-					Platform: qualysv1alpha1.PlatformSettings{
-						ServerUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/",
+				Spec: qualysv1.QualysPlatformConfigSpec{
+					Platform: qualysv1.PlatformSettings{
+						ServerUri: "https://cmsqagpublic.qg2.apps.qualys.com/ContainerSensor",
 					},
-					Credentials: qualysv1alpha1.CredentialsConfig{
-						SourceType: qualysv1alpha1.CredentialSourceSecret,
-						SecretRef: &qualysv1alpha1.SecretReference{
+					Credentials: qualysv1.CredentialsConfig{
+						SourceType: qualysv1.CredentialSourceSecret,
+						SecretRef: &qualysv1.SecretReference{
 							Name:      secretName,
 							Namespace: namespace,
 						},
 					},
 				},
 			}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: platformConfigName}, &qualysv1alpha1.QualysPlatformConfig{})
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: platformConfigName}, &qualysv1.QualysPlatformConfig{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, platformConfig)).To(Succeed())
 			}
@@ -91,7 +91,7 @@ var _ = Describe("QualysContainerSecurity Controller", func() {
 			By("setting credentials ready condition on platform config")
 			platformConfig.Status.Conditions = []metav1.Condition{
 				{
-					Type:               qualysv1alpha1.ConditionTypeCredentialsReady,
+					Type:               qualysv1.ConditionTypeCredentialsReady,
 					Status:             metav1.ConditionTrue,
 					Reason:             "CredentialsReady",
 					Message:            "Credentials are available",
@@ -101,25 +101,25 @@ var _ = Describe("QualysContainerSecurity Controller", func() {
 			Expect(k8sClient.Status().Update(ctx, platformConfig)).To(Succeed())
 
 			By("creating the custom resource for the Kind QualysContainerSecurity")
-			resource := &qualysv1alpha1.QualysContainerSecurity{
+			resource := &qualysv1.QualysContainerSecurity{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      resourceName,
 					Namespace: namespace,
 				},
-				Spec: qualysv1alpha1.QualysContainerSecuritySpec{
-					PlatformConfigRef: qualysv1alpha1.PlatformConfigReference{
+				Spec: qualysv1.QualysContainerSecuritySpec{
+					PlatformConfigRef: qualysv1.PlatformConfigReference{
 						Name: platformConfigName,
 					},
-					ContainerSensor: &qualysv1alpha1.ContainerSensorConfig{
+					ContainerSensor: &qualysv1.ContainerSensorConfig{
 						Enabled: true,
-						Image: &qualysv1alpha1.ImageSpec{
+						Image: &qualysv1.ImageSpec{
 							Repository: "qualys/qcs-sensor",
 							Tag:        "latest",
 						},
 					},
 				},
 			}
-			err = k8sClient.Get(ctx, typeNamespacedName, &qualysv1alpha1.QualysContainerSecurity{})
+			err = k8sClient.Get(ctx, typeNamespacedName, &qualysv1.QualysContainerSecurity{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -127,14 +127,14 @@ var _ = Describe("QualysContainerSecurity Controller", func() {
 
 		AfterEach(func() {
 			By("Cleanup the QualysContainerSecurity")
-			resource := &qualysv1alpha1.QualysContainerSecurity{}
+			resource := &qualysv1.QualysContainerSecurity{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			if err == nil {
 				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 			}
 
 			By("Cleanup the QualysPlatformConfig")
-			platformConfig := &qualysv1alpha1.QualysPlatformConfig{}
+			platformConfig := &qualysv1.QualysPlatformConfig{}
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: platformConfigName}, platformConfig)
 			if err == nil {
 				Expect(k8sClient.Delete(ctx, platformConfig)).To(Succeed())
@@ -165,11 +165,11 @@ var _ = Describe("QualysContainerSecurity Controller", func() {
 
 		It("should wait when platform config credentials are not ready", func() {
 			By("Updating platform config to have credentials not ready")
-			platformConfig := &qualysv1alpha1.QualysPlatformConfig{}
+			platformConfig := &qualysv1.QualysPlatformConfig{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: platformConfigName}, platformConfig)).To(Succeed())
 			platformConfig.Status.Conditions = []metav1.Condition{
 				{
-					Type:               qualysv1alpha1.ConditionTypeCredentialsReady,
+					Type:               qualysv1.ConditionTypeCredentialsReady,
 					Status:             metav1.ConditionFalse,
 					Reason:             "CredentialsNotReady",
 					Message:            "Waiting for credentials",

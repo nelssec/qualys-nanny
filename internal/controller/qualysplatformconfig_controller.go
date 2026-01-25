@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	qualysv1alpha1 "github.com/nelssec/qualys-nanny/api/v1alpha1"
+	qualysv1 "github.com/nelssec/qualys-nanny/api/v1"
 	"github.com/nelssec/qualys-nanny/internal/credentials"
 )
 
@@ -44,16 +44,16 @@ type QualysPlatformConfigReconciler struct {
 	Recorder record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=qualys.qualys.io,resources=qualysplatformconfigs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=qualys.qualys.io,resources=qualysplatformconfigs/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=qualys.qualys.io,resources=qualysplatformconfigs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=qualys.io,resources=qualysplatformconfigs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=qualys.io,resources=qualysplatformconfigs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=qualys.io,resources=qualysplatformconfigs/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *QualysPlatformConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	config := &qualysv1alpha1.QualysPlatformConfig{}
+	config := &qualysv1.QualysPlatformConfig{}
 	err := r.Get(ctx, req.NamespacedName, config)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -105,20 +105,20 @@ func (r *QualysPlatformConfigReconciler) Reconcile(ctx context.Context, req ctrl
 	return ctrl.Result{RequeueAfter: RequeueIntervalDefault}, nil
 }
 
-func (r *QualysPlatformConfigReconciler) setCredentialsCondition(config *qualysv1alpha1.QualysPlatformConfig, status metav1.ConditionStatus, reason, message string) {
+func (r *QualysPlatformConfigReconciler) setCredentialsCondition(config *qualysv1.QualysPlatformConfig, status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
-		Type:               qualysv1alpha1.ConditionTypeCredentialsReady,
+		Type:               qualysv1.ConditionTypeCredentialsReady,
 		Status:             status,
 		ObservedGeneration: config.Generation,
 		Reason:             reason,
 		Message:            message,
 	}
-	qualysv1alpha1.SetCondition(&config.Status.Conditions, condition)
+	qualysv1.SetCondition(&config.Status.Conditions, condition)
 }
 
 func (r *QualysPlatformConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&qualysv1alpha1.QualysPlatformConfig{}).
+		For(&qualysv1.QualysPlatformConfig{}).
 		Named("qualysplatformconfig").
 		Complete(r)
 }

@@ -1,111 +1,45 @@
 # Qualys Nanny Operator
 
-A Kubernetes operator for deploying and managing Qualys security agents on OpenShift and Kubernetes clusters.
+Kubernetes operator for deploying and managing Qualys security components on OpenShift and Kubernetes clusters.
 
-## Overview
+## Components Managed
 
-The Qualys Nanny Operator simplifies deployment of Qualys security agents by:
-
-- Managing Qualys Cloud Agent for host-level vulnerability and compliance scanning
-- Managing Qualys Container Security components (Container Sensor, Cluster Sensor, Admission Controller, Runtime Sensor)
-- Automatically detecting node OS (CoreOS, RHEL, Debian) and selecting appropriate deployment mode
-- Automatically creating required SecurityContextConstraints on OpenShift
-- Supporting both native Kubernetes Secrets and External Secrets Operator for credential management
-- Auto-detecting container runtime (containerd, CRI-O, Docker)
-
-## Components
-
-### QualysCloudAgent
-
-Host-level security agent for vulnerability management and compliance scanning.
-
-| Mode | OS Types | Image | Description |
-|------|----------|-------|-------------|
-| `bootstrapper` | RHEL, CentOS, Debian, Ubuntu | `nelssec/qualys-agent-bootstrapper` | Installs agent on host via nsenter |
-| `coreos` | CoreOS, RHCOS, Flatcar | `qualys/qagent-rhcos` | Runs agent in container (immutable OS) |
-
-Set `deploymentMode: auto` (default) to let the operator detect the appropriate mode.
-
-### QualysContainerSecurity
-
-Container security suite with four deployable components:
-
-| Component | Type | Default | Description |
-|-----------|------|---------|-------------|
-| Container Sensor | DaemonSet | Enabled | Scans container images and running containers for vulnerabilities |
-| Cluster Sensor | Deployment | Enabled | Monitors K8s API for cluster events, network activity, and workload inventory |
-| Admission Controller | Deployment + Webhook | Disabled | Enforces security policies on resource creation/updates |
-| Runtime Sensor | DaemonSet | Disabled | Uses eBPF to track file and process events in containers |
-
-## Architecture
-
-The operator manages three Custom Resources:
-
-| CRD | Scope | Purpose |
-|-----|-------|---------|
-| `QualysPlatformConfig` | Cluster | Shared Qualys platform settings and credentials |
-| `QualysCloudAgent` | Namespace | Cloud Agent DaemonSet for host scanning |
-| `QualysContainerSecurity` | Namespace | Container security components |
-
-## Prerequisites
-
-- OpenShift 4.12+ or Kubernetes 1.25+
-- Qualys subscription with Cloud Agent and/or Container Security
-- Qualys activation ID and customer ID
-- `kubectl` or `oc` CLI configured
-
-## Installation
-
-### Option 1: Deploy from Source
-
-```bash
-git clone https://github.com/nelssec/qualys-nanny.git
-cd qualys-nanny
-
-make docker-build docker-push IMG=<your-registry>/qualys-nanny:v0.1.0
-make install
-make deploy IMG=<your-registry>/qualys-nanny:v0.1.0
-```
-
-### Option 2: Deploy via OLM (OperatorHub)
-
-```bash
-make bundle-build bundle-push BUNDLE_IMG=<your-registry>/qualys-nanny-bundle:v0.1.0
-operator-sdk run bundle <your-registry>/qualys-nanny-bundle:v0.1.0
-```
+| Component | Type | Description |
+|-----------|------|-------------|
+| Container Sensor | DaemonSet | Scans container images and running containers for vulnerabilities |
+| Cluster Sensor | Deployment | Monitors K8s API for workload inventory, network activity, compliance |
+| Admission Controller | Deployment + Webhook | Enforces security policies on resource creation |
+| Runtime Sensor | DaemonSet | eBPF-based file and process event tracking |
+| Cloud Agent | DaemonSet | Host-level vulnerability and compliance scanning |
 
 ## Quick Start
 
-### 1. Create the Namespace
+### 1. Install the Operator
 
 ```bash
-kubectl create namespace qualys
+kubectl apply -f dist/install.yaml
 ```
 
 ### 2. Create Credentials Secret
 
-```yaml
-apiVersion: v1
-kind: Secret
-metadata:
-  name: qualys-credentials
-  namespace: qualys
-type: Opaque
-stringData:
-  ACTIVATION_ID: "your-activation-id"
-  CUSTOMER_ID: "your-customer-id"
+```bash
+kubectl create secret generic qualys-credentials \
+  --namespace qualys \
+  --from-literal=CUSTOMER_ID=<your-customer-id> \
+  --from-literal=ACTIVATION_ID=<your-activation-id>
 ```
 
 ### 3. Create Platform Configuration
 
 ```yaml
-apiVersion: qualys.qualys.io/v1alpha1
+apiVersion: qualys.io/v1
 kind: QualysPlatformConfig
 metadata:
   name: qualys-platform
 spec:
   platform:
-    serverUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
+    serverUri: "https://cmsqagpublic.qg1.apps.qualys.ca/ContainerSensor"
+    gatewayUrl: "https://gateway.qg1.apps.qualys.ca"
   credentials:
     sourceType: secret
     secretRef:
@@ -113,29 +47,10 @@ spec:
       namespace: qualys
 ```
 
-### 4. Deploy Cloud Agent (Host Scanning)
+### 4. Deploy Container Security
 
 ```yaml
-apiVersion: qualys.qualys.io/v1alpha1
-kind: QualysCloudAgent
-metadata:
-  name: qualys-cloud-agent
-  namespace: qualys
-spec:
-  platformConfigRef:
-    name: qualys-platform
-  deploymentMode: auto
-  config:
-    logLevel: 3
-  scheduling:
-    tolerations:
-      - operator: Exists
-```
-
-### 5. Deploy Container Security
-
-```yaml
-apiVersion: qualys.qualys.io/v1alpha1
+apiVersion: qualys.io/v1
 kind: QualysContainerSecurity
 metadata:
   name: qualys-container-security
@@ -145,204 +60,140 @@ spec:
     name: qualys-platform
   containerSensor:
     enabled: true
-    image:
-      repository: qualys/qcs-sensor
-      tag: "latest"
-    mode: general
-    k8sMode: true
+    privilegeMode: standard
     scanning:
       enableImageScan: true
       enableContainerScan: true
-      scanThreadPoolSize: 2
-    storage:
-      usePersistentStorage: true
-      storageSize: "10Gi"
+      enableScaScan: true
   clusterSensor:
     enabled: true
-    replicas: 1
-  admissionController:
-    enabled: false
-    replicas: 2
-    failurePolicy: Ignore
-  runtimeSensor:
-    enabled: false
-  containerRuntime:
-    type: auto
-  scheduling:
-    nodeSelector:
-      kubernetes.io/os: linux
-    tolerations:
-      - operator: Exists
-        effect: NoSchedule
-      - operator: Exists
-        effect: NoExecute
-    priorityClassName: system-node-critical
+    cloudProvider: AWS
+    clusterName: my-cluster
 ```
 
-## Configuration Reference
+## Privilege Modes
 
-### QualysPlatformConfig
+The Container Sensor supports four privilege modes to balance security requirements with scanning capabilities:
 
-| Field | Description | Required |
-|-------|-------------|----------|
-| `spec.platform.serverUri` | Qualys platform URL | Yes |
-| `spec.platform.proxy` | Proxy configuration | No |
-| `spec.credentials.sourceType` | `secret` or `externalSecret` | Yes |
-| `spec.credentials.secretRef` | Reference to K8s Secret | When sourceType=secret |
-| `spec.credentials.externalSecretRef` | Reference to ExternalSecret | When sourceType=externalSecret |
+| Mode | Runs As | Capabilities | Features |
+|------|---------|--------------|----------|
+| `unprivileged` | UID 65534 | None | Image scanning only |
+| `minimal` | Root | SYS_PTRACE | Image + container scanning |
+| `standard` | Root | SYS_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_READ_SEARCH | All features (recommended) |
+| `privileged` | Root | Full privileged | All features + Runtime Sensor |
 
-### QualysCloudAgent
+**Note:** The Container Sensor does NOT require `privileged: true`. Use `standard` mode for full functionality. Only the Runtime Sensor (eBPF) requires privileged mode.
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `spec.platformConfigRef.name` | Name of QualysPlatformConfig | Required |
-| `spec.deploymentMode` | `auto`, `bootstrapper`, or `coreos` | `auto` |
-| `spec.image.repository` | Container image | Auto-selected based on mode |
-| `spec.image.tag` | Image tag | `v2.1.0` (bootstrapper) / `latest` (coreos) |
-| `spec.config.logLevel` | Log verbosity (0-5) | `3` |
-| `spec.config.cmdMaxTimeOut` | Command timeout (seconds) | `1800` |
-| `spec.scheduling.tolerations` | Pod tolerations | All taints |
-| `spec.scheduling.priorityClassName` | Priority class | `system-node-critical` |
-| `spec.resources` | CPU/memory limits | None |
-| `spec.coreosConfig.cpuLimit` | CPU limit for CoreOS mode | `200m` |
-| `spec.coreosConfig.providerName` | Cloud provider (AWS, AZURE, GCP, etc.) | `AUTO` |
+## Sample Configurations
 
-### QualysContainerSecurity
+| File | Use Case |
+|------|----------|
+| `qualys_operator_containersecurity_recommended.yaml` | Recommended default (standard mode) |
+| `qualys_operator_containersecurity_standard.yaml` | Full configuration with all options |
+| `qualys_operator_containersecurity_minimal.yaml` | Baseline PSS compliant |
+| `qualys_operator_containersecurity_unprivileged.yaml` | Restricted PSS compliant |
+| `qualys_operator_containersecurity_privileged.yaml` | All features + Runtime Sensor |
 
-#### Container Sensor (DaemonSet)
+## Operator Permissions
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `spec.containerSensor.enabled` | Deploy the Container Sensor | `true` |
-| `spec.containerSensor.image.repository` | Container image | `qualys/qcs-sensor` |
-| `spec.containerSensor.mode` | `general`, `registry`, or `cicd` | `general` |
-| `spec.containerSensor.k8sMode` | Enable Kubernetes integration | `true` |
-| `spec.containerSensor.scanning.enableImageScan` | Enable image scanning | `true` |
-| `spec.containerSensor.scanning.enableContainerScan` | Enable container scanning | `true` |
-| `spec.containerSensor.scanning.enableMalwareDetection` | Enable malware detection | `false` |
-| `spec.containerSensor.scanning.enableSecretDetection` | Enable secret detection | `false` |
-| `spec.containerSensor.scanning.scanThreadPoolSize` | Concurrent scan threads | `2` |
-| `spec.containerSensor.storage.usePersistentStorage` | Use persistent storage | `true` |
-| `spec.containerSensor.storage.storageSize` | Persistent volume size | `10Gi` |
-| `spec.containerSensor.logging.logLevel` | Log verbosity (0-5) | `3` |
+The operator requires the following RBAC permissions:
 
-#### Cluster Sensor (Deployment)
+### Core Resources
+- ServiceAccounts, ConfigMaps, Secrets, Services: full CRUD
+- Nodes, Pods, Namespaces: get, list, watch
+- Events: create, patch
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `spec.clusterSensor.enabled` | Deploy the Cluster Sensor | `true` |
-| `spec.clusterSensor.image.repository` | Container image | `qualys/cluster-sensor` |
-| `spec.clusterSensor.replicas` | Number of replicas | `1` |
-| `spec.clusterSensor.logging.logLevel` | Log verbosity (0-5) | `3` |
+### Workload Resources
+- DaemonSets, Deployments: full CRUD
+- Jobs, CronJobs: get, list, watch, create, delete
 
-#### Admission Controller (Deployment + Webhook)
+### RBAC Resources
+- ClusterRoles, ClusterRoleBindings, Roles, RoleBindings: full CRUD
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `spec.admissionController.enabled` | Deploy the Admission Controller | `false` |
-| `spec.admissionController.image.repository` | Container image | `qualys/admission-controller` |
-| `spec.admissionController.replicas` | Number of replicas | `2` |
-| `spec.admissionController.failurePolicy` | Webhook failure policy (`Fail` or `Ignore`) | `Ignore` |
-| `spec.admissionController.namespaceSelector` | Limit namespaces for admission control | None |
+### Admission Resources
+- ValidatingWebhookConfigurations: full CRUD
 
-#### Runtime Sensor (DaemonSet with eBPF)
+### OpenShift Resources
+- SecurityContextConstraints: full CRUD (OpenShift only)
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `spec.runtimeSensor.enabled` | Deploy the Runtime Sensor | `false` |
-| `spec.runtimeSensor.image.repository` | Container image | `qualys/runtime-sensor` |
-| `spec.runtimeSensor.logging.logLevel` | Log verbosity (0-5) | `3` |
+### Cluster-wide Read Access
+- All resources: get, list (required for Cluster Sensor)
 
-#### Shared Settings
+## Platform URLs
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `spec.containerRuntime.type` | `auto`, `containerd`, `cri-o`, `docker` | `auto` |
-| `spec.scheduling.nodeSelector` | Node selector for DaemonSets | `kubernetes.io/os: linux` |
-| `spec.scheduling.tolerations` | Pod tolerations | All taints |
-| `spec.scheduling.priorityClassName` | Priority class | `system-node-critical` |
+Find your regional Qualys platform URLs at: https://www.qualys.com/platform-identification
 
-## External Secrets Integration
+| Region | Container Sensor URL | Gateway URL |
+|--------|---------------------|-------------|
+| US1 | https://cmsqagpublic.qg1.apps.qualys.com/ContainerSensor | https://gateway.qg1.apps.qualys.com |
+| US2 | https://cmsqagpublic.qg2.apps.qualys.com/ContainerSensor | https://gateway.qg2.apps.qualys.com |
+| US3 | https://cmsqagpublic.qg3.apps.qualys.com/ContainerSensor | https://gateway.qg3.apps.qualys.com |
+| EU1 | https://cmsqagpublic.qg1.apps.qualys.eu/ContainerSensor | https://gateway.qg1.apps.qualys.eu |
+| CA1 | https://cmsqagpublic.qg1.apps.qualys.ca/ContainerSensor | https://gateway.qg1.apps.qualys.ca |
 
-To use External Secrets Operator instead of native Secrets:
+## Cloud Provider Configuration
 
+For the Cluster Sensor, specify your cloud provider and cluster identifier:
+
+### AWS
 ```yaml
-apiVersion: qualys.qualys.io/v1alpha1
-kind: QualysPlatformConfig
-metadata:
-  name: qualys-platform
-spec:
-  platform:
-    serverUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
-  credentials:
-    sourceType: externalSecret
-    externalSecretRef:
-      name: qualys-credentials
-      namespace: qualys
-      secretStoreRef:
-        name: vault-backend
-        kind: ClusterSecretStore
-      keyMappings:
-        activationId: "qualys/activation-id"
-        customerId: "qualys/customer-id"
+clusterSensor:
+  cloudProvider: AWS
+  clusterID: "arn:aws:eks:us-east-1:123456789:cluster/my-cluster"
 ```
 
-## Qualys Platform URLs
+### Azure
+```yaml
+clusterSensor:
+  cloudProvider: AZURE
+  clusterID: "/subscriptions/xxx/resourceGroups/xxx/providers/Microsoft.ContainerService/managedClusters/xxx"
+  clusterRegion: "eastus"
+```
 
-| Region | URL |
-|--------|-----|
-| US Platform 1 | `https://qagpublic.qg1.apps.qualys.com/CloudAgent/` |
-| US Platform 2 | `https://qagpublic.qg2.apps.qualys.com/CloudAgent/` |
-| EU Platform | `https://qagpublic.qg1.apps.qualys.eu/CloudAgent/` |
+### GCP
+```yaml
+clusterSensor:
+  cloudProvider: GCP
+  clusterID: "projects/my-project/locations/us-central1/clusters/my-cluster"
+```
 
-## Status and Monitoring
+### Self-Managed Kubernetes
+```yaml
+clusterSensor:
+  cloudProvider: SELF_MANAGED_K8S
+  clusterName: "my-cluster"
+```
+
+## OpenShift Support
+
+On OpenShift, the operator automatically creates SecurityContextConstraints (SCCs) for each component:
+
+| Component | SCC Permissions |
+|-----------|----------------|
+| Container Sensor | hostNetwork, hostPID, runtime socket access |
+| Cluster Sensor | Non-privileged (runs as user 555) |
+| Runtime Sensor | Privileged (required for eBPF) |
+| Cloud Agent | Privileged, hostPID, SYS_ADMIN |
+
+## Verification
 
 ```bash
-kubectl get qualysplatformconfig qualys-platform -o yaml
-kubectl get qualyscloudagent -n qualys
+kubectl get qualysplatformconfig
 kubectl get qualyscontainersecurity -n qualys
-kubectl get pods -n qualys -l app.kubernetes.io/managed-by=qualys-nanny
+kubectl get pods -n qualys
+kubectl get daemonset -n qualys
+kubectl get deployment -n qualys
 ```
 
-Example output:
-
-```
-NAME                       CONTAINER   CLUSTER   ADMISSION   RUNTIME   AGE
-qualys-container-security  true        true      false       false     2h
-```
-
-## Uninstallation
+## Building from Source
 
 ```bash
-kubectl delete qualyscloudagent -n qualys --all
-kubectl delete qualyscontainersecurity -n qualys --all
-kubectl delete qualysplatformconfig --all
-make undeploy
-make uninstall
-```
-
-## Development
-
-```bash
-make install
-make run
-make test
-make generate manifests
 make build
+make docker-build IMG=<your-registry>/qualys-nanny:latest
+make docker-push IMG=<your-registry>/qualys-nanny:latest
+make build-installer IMG=<your-registry>/qualys-nanny:latest
 ```
 
 ## License
 
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+Apache License 2.0

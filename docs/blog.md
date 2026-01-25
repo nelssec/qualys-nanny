@@ -1,322 +1,125 @@
-# Deploying Qualys Security Agents on OpenShift with the Qualys Nanny Operator
+# Qualys Container Security on Kubernetes with the Qualys Nanny Operator
 
-Securing containerized workloads requires visibility at multiple layers: the host operating system, container images, runtime behavior, and the orchestration platform itself. This post walks through deploying the complete Qualys security stack on OpenShift clusters using the Qualys Nanny Operator.
+This guide covers deploying Qualys Container Security components on Kubernetes and OpenShift clusters using the Qualys Nanny Operator.
 
-## Architecture Overview
+## Architecture
 
-The Qualys Nanny Operator manages two primary custom resources that deploy five distinct security components:
-
-```mermaid
-flowchart TB
-    subgraph cluster[OpenShift Cluster]
-        OPERATOR[Qualys Nanny Operator]
-
-        subgraph control[Control Plane]
-            CLUSTER[Cluster Sensor]
-            ADMISSION[Admission Controller]
-        end
-
-        subgraph node1[Worker Node 1]
-            CA1[Cloud Agent]
-            CS1[Container Sensor]
-            RT1[Runtime Sensor]
-        end
-
-        subgraph node2[Worker Node 2]
-            CA2[Cloud Agent]
-            CS2[Container Sensor]
-            RT2[Runtime Sensor]
-        end
-    end
-
-    QP[Qualys Platform]
-
-    OPERATOR --> CA1
-    OPERATOR --> CA2
-    OPERATOR --> CS1
-    OPERATOR --> CS2
-    OPERATOR --> RT1
-    OPERATOR --> RT2
-    OPERATOR --> CLUSTER
-    OPERATOR --> ADMISSION
-
-    CA1 --> QP
-    CA2 --> QP
-    CS1 --> QP
-    CS2 --> QP
-    RT1 --> QP
-    RT2 --> QP
-    CLUSTER --> QP
-    ADMISSION --> QP
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Kubernetes Cluster                          │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                   Qualys Namespace                        │  │
+│  │  ┌─────────────────┐    ┌─────────────────────────────┐   │  │
+│  │  │ Platform Config │───▶│ Credentials Secret          │   │  │
+│  │  └────────┬────────┘    └─────────────────────────────┘   │  │
+│  │           │                                               │  │
+│  │           ▼                                               │  │
+│  │  ┌─────────────────────────────────────────────────────┐  │  │
+│  │  │           QualysContainerSecurity CR                │  │  │
+│  │  └─────────────────────────────────────────────────────┘  │  │
+│  │           │                                               │  │
+│  │     ┌─────┴─────┬─────────────┬─────────────┐            │  │
+│  │     ▼           ▼             ▼             ▼            │  │
+│  │  Container   Cluster     Admission      Runtime          │  │
+│  │  Sensor      Sensor      Controller     Sensor           │  │
+│  │  (DaemonSet) (Deploy)    (Deploy)       (DaemonSet)      │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │  Worker 1   │  │  Worker 2   │  │  Worker N   │             │
+│  │ ┌─────────┐ │  │ ┌─────────┐ │  │ ┌─────────┐ │             │
+│  │ │Container│ │  │ │Container│ │  │ │Container│ │             │
+│  │ │ Sensor  │ │  │ │ Sensor  │ │  │ │ Sensor  │ │             │
+│  │ └─────────┘ │  │ └─────────┘ │  │ └─────────┘ │             │
+│  └─────────────┘  └─────────────┘  └─────────────┘             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │ Qualys Platform │
+                    └─────────────────┘
 ```
 
-## Custom Resource Hierarchy
-
-The operator uses three CRDs with a hierarchical relationship:
-
-```mermaid
-flowchart LR
-    subgraph CRDs
-        PC[QualysPlatformConfig]
-        CA[QualysCloudAgent]
-        CS[QualysContainerSecurity]
-    end
-
-    subgraph Credentials
-        SEC[Secret]
-        ESO[ExternalSecret]
-    end
-
-    subgraph "Host Resources"
-        DS1[Cloud Agent DaemonSet]
-        SA1[ServiceAccount]
-        CM1[ConfigMap]
-        SCC1[SCC]
-    end
-
-    subgraph "Container Resources"
-        DS2[Container Sensor DaemonSet]
-        DS3[Runtime Sensor DaemonSet]
-        DEP1[Cluster Sensor Deployment]
-        DEP2[Admission Controller Deployment]
-        WH[ValidatingWebhook]
-    end
-
-    PC --> SEC
-    PC --> ESO
-    CA --> PC
-    CS --> PC
-    CA --> DS1
-    CA --> SA1
-    CA --> CM1
-    CA --> SCC1
-    CS --> DS2
-    CS --> DS3
-    CS --> DEP1
-    CS --> DEP2
-    DEP2 --> WH
-```
-
-## Security Components
-
-### Component Overview
-
-| Component | CR | Type | Purpose |
-|-----------|-----|------|---------|
-| Cloud Agent | QualysCloudAgent | DaemonSet | Host-level vulnerability and compliance scanning |
-| Container Sensor | QualysContainerSecurity | DaemonSet | Container image and runtime vulnerability scanning |
-| Cluster Sensor | QualysContainerSecurity | Deployment | K8s API monitoring, workload inventory, network activity |
-| Admission Controller | QualysContainerSecurity | Deployment + Webhook | Security policy enforcement on resource creation |
-| Runtime Sensor | QualysContainerSecurity | DaemonSet | eBPF-based file and process event tracking |
-
-### Default Configuration
-
-| Component | Default State |
-|-----------|---------------|
-| Cloud Agent | Enabled (separate CR) |
-| Container Sensor | Enabled |
-| Cluster Sensor | Enabled |
-| Admission Controller | Disabled |
-| Runtime Sensor | Disabled |
-
-## Qualys Cloud Agent on CoreOS and RHEL
-
-The Cloud Agent performs host-level vulnerability management and compliance scanning. On immutable operating systems like CoreOS, traditional agent installation isn't possible. The operator solves this by running the agent as a privileged container with host access.
-
-### Deployment Modes
-
-```mermaid
-flowchart TD
-    START[Deploy QualysCloudAgent]
-    MODE{deploymentMode?}
-    AUTO[Auto-detect OS]
-    BOOT[Bootstrapper Mode]
-    CORE[CoreOS Mode]
-    DETECT{Node OS?}
-
-    START --> MODE
-    MODE -->|auto| AUTO
-    MODE -->|bootstrapper| BOOT
-    MODE -->|coreos| CORE
-    AUTO --> DETECT
-    DETECT -->|CoreOS/RHCOS/Flatcar| CORE
-    DETECT -->|RHEL/CentOS/Debian/Ubuntu| BOOT
-```
-
-| Mode | OS Types | Image | Description |
-|------|----------|-------|-------------|
-| `bootstrapper` | RHEL, CentOS, Debian, Ubuntu | `nelssec/qualys-agent-bootstrapper` | Installs agent on host via nsenter |
-| `coreos` | CoreOS, RHCOS, Flatcar | `qualys/qagent-rhcos` | Runs agent in container (immutable OS) |
-
-### Host Mounts Required
-
-```mermaid
-flowchart LR
-    AGENT[Cloud Agent Pod]
-
-    AGENT --> ETC[/etc]
-    AGENT --> VAR[/var]
-    AGENT --> PROC[/proc]
-    AGENT --> SYS[/sys]
-    AGENT --> OPT[/opt/qualys]
-```
-
-### CoreOS Considerations
-
-CoreOS uses an immutable root filesystem with atomic updates. The agent handles this by:
-
-- Storing persistent data in `/opt/qualys` (mounted from the host)
-- Using the host's `/etc/machine-id` for consistent host identification
-- Running as a privileged container to access host namespaces
-
-## Container Security Components
-
-The QualysContainerSecurity CR manages four components that can be independently enabled or disabled.
+## Components
 
 ### Container Sensor (DaemonSet)
-
 Scans container images and running containers for vulnerabilities.
 
-```mermaid
-flowchart TB
-    subgraph node[OpenShift Node]
-        SENSOR[Container Sensor]
-        SOCKET[CRI-O Socket]
-        IMAGES[Image Store]
-
-        subgraph workloads[Workload Pods]
-            APP1[App 1]
-            APP2[App 2]
-            APP3[App 3]
-        end
-    end
-
-    SENSOR --> SOCKET
-    SENSOR --> IMAGES
-    SOCKET --> workloads
-```
-
 **Features:**
-- Image vulnerability scanning
+- Image vulnerability scanning via CRI API
 - Running container scanning
-- Malware detection (optional)
-- Secret detection (optional)
+- SCA (Software Composition Analysis)
 
 ### Cluster Sensor (Deployment)
-
-Monitors the Kubernetes API server for cluster-wide visibility.
-
-```mermaid
-flowchart LR
-    subgraph cluster[Cluster]
-        API[K8s API Server]
-        CS[Cluster Sensor]
-    end
-
-    QP[Qualys Platform]
-
-    CS --> API
-    CS --> QP
-
-    API -->|Events| CS
-    API -->|Workloads| CS
-    API -->|Network Policies| CS
-```
+Monitors the Kubernetes API for cluster-wide visibility.
 
 **Features:**
-- Cluster event monitoring
 - Workload inventory
+- K8s compliance scanning
 - Network policy analysis
 - RBAC visibility
+- Host scanning (via Jobs)
 
 ### Admission Controller (Deployment + Webhook)
-
 Enforces security policies on resource creation and updates.
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant API as K8s API
-    participant WH as Admission Webhook
-    participant AC as Admission Controller
-    participant QP as Qualys Platform
-
-    User->>API: Create Pod
-    API->>WH: Validate Request
-    WH->>AC: Check Policy
-    AC->>QP: Lookup Vulnerabilities
-    QP-->>AC: Policy Decision
-    AC-->>WH: Allow/Deny
-    WH-->>API: Response
-    API-->>User: Result
-```
-
 **Features:**
-- Block deployment of vulnerable images
-- Enforce security baselines
-- Configurable failure policy (Fail/Ignore)
+- Block vulnerable images
+- Audit or block mode
 - Namespace-scoped enforcement
+- Configurable failure policy
 
 ### Runtime Sensor (DaemonSet)
-
 Uses eBPF for kernel-level visibility into container behavior.
-
-```mermaid
-flowchart TB
-    subgraph node[Node Kernel]
-        EBPF[eBPF Programs]
-        subgraph events[Kernel Events]
-            FILE[File Access]
-            PROC[Process Exec]
-            NET[Network]
-        end
-    end
-
-    RT[Runtime Sensor]
-    QP[Qualys Platform]
-
-    EBPF --> events
-    RT --> EBPF
-    RT --> QP
-```
 
 **Features:**
 - Real-time file integrity monitoring
 - Process execution tracking
-- Network connection visibility
 - Behavioral anomaly detection
+
+**Note:** Runtime Sensor requires `privileged: true` for eBPF kernel access. This is the only component that requires privileged mode.
 
 ## Installation
 
-### 1. Create Namespace and Credentials
+### Prerequisites
+- Kubernetes 1.25+ or OpenShift 4.12+
+- kubectl or oc CLI
+- Qualys subscription with Container Security module
+- CUSTOMER_ID and ACTIVATION_ID from Qualys portal
 
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: qualys
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: qualys-credentials
-  namespace: qualys
-type: Opaque
-stringData:
-  ACTIVATION_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-  CUSTOMER_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+### Step 1: Install the Operator
+
+```bash
+kubectl apply -f dist/install.yaml
 ```
 
-### 2. Create Platform Configuration
+This creates:
+- `qualys` namespace
+- CRDs for QualysPlatformConfig and QualysContainerSecurity
+- Operator deployment with required RBAC
+
+### Step 2: Create Credentials
+
+```bash
+kubectl create secret generic qualys-credentials \
+  --namespace qualys \
+  --from-literal=CUSTOMER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
+  --from-literal=ACTIVATION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+### Step 3: Configure Platform URLs
+
+Create a QualysPlatformConfig with your regional URLs:
 
 ```yaml
-apiVersion: qualys.qualys.io/v1alpha1
+apiVersion: qualys.io/v1
 kind: QualysPlatformConfig
 metadata:
   name: qualys-platform
 spec:
   platform:
-    serverUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/"
+    serverUri: "https://cmsqagpublic.qg1.apps.qualys.ca/ContainerSensor"
+    gatewayUrl: "https://gateway.qg1.apps.qualys.ca"
   credentials:
     sourceType: secret
     secretRef:
@@ -324,29 +127,12 @@ spec:
       namespace: qualys
 ```
 
-### 3. Deploy Cloud Agent (Host Scanning)
+Find your regional URLs: https://www.qualys.com/platform-identification
+
+### Step 4: Deploy Container Security
 
 ```yaml
-apiVersion: qualys.qualys.io/v1alpha1
-kind: QualysCloudAgent
-metadata:
-  name: qualys-cloud-agent
-  namespace: qualys
-spec:
-  platformConfigRef:
-    name: qualys-platform
-  deploymentMode: auto
-  config:
-    logLevel: 3
-  scheduling:
-    tolerations:
-      - operator: Exists
-```
-
-### 4. Deploy Container Security
-
-```yaml
-apiVersion: qualys.qualys.io/v1alpha1
+apiVersion: qualys.io/v1
 kind: QualysContainerSecurity
 metadata:
   name: qualys-container-security
@@ -356,182 +142,233 @@ spec:
     name: qualys-platform
   containerSensor:
     enabled: true
-    mode: general
-    k8sMode: true
+    privilegeMode: standard
     scanning:
       enableImageScan: true
       enableContainerScan: true
+      enableScaScan: true
   clusterSensor:
     enabled: true
-    replicas: 1
+    cloudProvider: AWS
+    clusterName: my-cluster
+    k8sCompliance: true
+    hostScanner:
+      enabled: true
   admissionController:
     enabled: false
-    failurePolicy: Ignore
   runtimeSensor:
     enabled: false
-  containerRuntime:
-    type: auto
 ```
 
-## Reconciliation Flow
+## Privilege Modes
 
-The operator continuously reconciles the desired state with the actual state:
+The Container Sensor supports four privilege modes:
 
-```mermaid
-flowchart LR
-    A[CR Created] --> B[Validate Config]
-    B --> C{Credentials Ready?}
-    C -->|No| D[Wait]
-    D --> C
-    C -->|Yes| E[Reconcile Components]
-    E --> F[Container Sensor]
-    E --> G[Cluster Sensor]
-    E --> H[Admission Controller]
-    E --> I[Runtime Sensor]
-    F --> J{All Ready?}
-    G --> J
-    H --> J
-    I --> J
-    J -->|No| K[Degraded]
-    J -->|Yes| L[Available]
-    K --> E
-    L --> M[Watch for Changes]
-    M --> B
+### unprivileged
+- Runs as: UID 65534 (nobody)
+- Capabilities: None (all dropped)
+- Features: Image scanning only
+- PSS Profile: Restricted
+- Use when: Strict security requirements, image scanning sufficient
+
+### minimal
+- Runs as: Root (UID 0)
+- Capabilities: SYS_PTRACE
+- Features: Image + container scanning
+- PSS Profile: Baseline
+- Use when: Need container scanning without full privileges
+
+### standard (Recommended)
+- Runs as: Root (UID 0)
+- Capabilities: SYS_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_READ_SEARCH
+- Features: All scanning features
+- PSS Profile: Privileged namespace required
+- Use when: Full functionality needed
+
+### privileged
+- Runs as: Root (UID 0)
+- Capabilities: Full privileged mode
+- Features: All scanning + Runtime Sensor
+- PSS Profile: Privileged
+- Use when: Runtime Sensor (eBPF) required
+
+**Key Point:** The Container Sensor does NOT require `privileged: true`. Standard mode provides full scanning capabilities with specific Linux capabilities instead of full privileges.
+
+## RBAC Permissions
+
+### Operator Permissions
+
+The operator requires these permissions to manage resources:
+
+```yaml
+rules:
+- apiGroups: [""]
+  resources: [serviceaccounts, configmaps, secrets, services, namespaces, nodes, pods, endpoints]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [apps]
+  resources: [daemonsets, deployments]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [clusterroles, clusterrolebindings, roles, rolebindings]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [admissionregistration.k8s.io]
+  resources: [validatingwebhookconfigurations]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: [get, list]
 ```
 
-## Security Context Constraints
+### Component Permissions
 
-On OpenShift, the operator automatically creates SCCs to grant the required privileges:
+**Container Sensor:**
+- Runtime socket access (read-only)
+- Host filesystem access (for scanning)
 
-```mermaid
-flowchart LR
-    OP[Operator]
+**Cluster Sensor:**
+- Cluster-wide read access to all resources
+- Watch on pods, namespaces, nodes, services
 
-    subgraph sccs[Created SCCs]
-        SCC1[Cloud Agent SCC]
-        SCC2[Container Sensor SCC]
-        SCC3[Runtime Sensor SCC]
-    end
+**Admission Controller:**
+- Read access to pods, deployments, daemonsets
+- ValidatingWebhookConfiguration management
 
-    subgraph sas[Service Accounts]
-        SA1[cloud-agent-sa]
-        SA2[container-sensor-sa]
-        SA3[runtime-sensor-sa]
-    end
+## OpenShift Security Context Constraints
 
-    OP --> SCC1
-    OP --> SCC2
-    OP --> SCC3
-    SCC1 --> SA1
-    SCC2 --> SA2
-    SCC3 --> SA3
+On OpenShift, the operator creates SCCs automatically:
+
+| Component | SCC Name | Privileges |
+|-----------|----------|------------|
+| Container Sensor | `{name}-container-scc` | hostNetwork, hostPID, capabilities |
+| Cluster Sensor | `{name}-cluster-scc` | Non-privileged (user 555) |
+| Runtime Sensor | `{name}-runtime-scc` | Privileged (eBPF required) |
+
+## Cloud Provider Configuration
+
+### AWS (EKS/ROSA)
+```yaml
+clusterSensor:
+  cloudProvider: AWS
+  clusterID: "arn:aws:eks:us-east-1:123456789:cluster/my-cluster"
 ```
 
-**Cloud Agent SCC grants:**
-- `privileged: true`
-- `hostPID: true`
-- `SYS_ADMIN` capability
+### Azure (AKS)
+```yaml
+clusterSensor:
+  cloudProvider: AZURE
+  clusterID: "/subscriptions/xxx/resourceGroups/xxx/providers/Microsoft.ContainerService/managedClusters/xxx"
+  clusterRegion: "eastus"
+```
 
-**Container Sensor SCC grants:**
-- `hostNetwork: true`
-- Container runtime socket access
+### GCP (GKE)
+```yaml
+clusterSensor:
+  cloudProvider: GCP
+  clusterID: "projects/my-project/locations/us-central1/clusters/my-cluster"
+```
 
-**Runtime Sensor SCC grants:**
-- `privileged: true`
-- eBPF capabilities
+### OCI (OKE)
+```yaml
+clusterSensor:
+  cloudProvider: OCI
+  clusterID: "ocid1.cluster.oc1..."
+  clusterName: "my-cluster"
+```
 
-## Monitoring Deployment Status
+### Self-Managed
+```yaml
+clusterSensor:
+  cloudProvider: SELF_MANAGED_K8S
+  clusterName: "my-cluster"
+```
 
+## Verification
+
+### Check Operator Status
+```bash
+kubectl get pods -n qualys -l control-plane=controller-manager
+```
+
+### Check Platform Config
 ```bash
 kubectl get qualysplatformconfig qualys-platform -o yaml
-kubectl get qualyscloudagent -n qualys -o wide
-kubectl get qualyscontainersecurity -n qualys -o wide
-kubectl get pods -n qualys -o wide
 ```
 
-Example output:
+### Check Container Security Status
+```bash
+kubectl get qualyscontainersecurity -n qualys
+```
 
+Expected output:
 ```
 NAME                       CONTAINER   CLUSTER   ADMISSION   RUNTIME   AGE
-qualys-container-security  true        true      false       false     2h
+qualys-container-security  true        true      false       false     5m
 ```
 
-## Data Flow to Qualys Platform
+### Check Component Pods
+```bash
+kubectl get pods -n qualys
+```
 
-```mermaid
-sequenceDiagram
-    participant CA as Cloud Agent
-    participant CS as Container Sensor
-    participant CL as Cluster Sensor
-    participant RT as Runtime Sensor
-    participant QP as Qualys Platform
-
-    loop Host Scanning
-        CA->>CA: Scan packages
-        CA->>QP: Upload VM findings
-    end
-
-    loop Container Monitoring
-        CS->>CS: Scan images
-        CS->>QP: Upload vulnerabilities
-    end
-
-    loop Cluster Monitoring
-        CL->>CL: Watch K8s events
-        CL->>QP: Upload inventory
-    end
-
-    loop Runtime Monitoring
-        RT->>RT: Capture eBPF events
-        RT->>QP: Upload behaviors
-    end
-
-    QP->>QP: Correlate data
+### Check DaemonSet Status
+```bash
+kubectl get daemonset -n qualys
 ```
 
 ## Troubleshooting
 
-### Component Not Starting
+### Pods Not Starting
 
-```mermaid
-flowchart TD
-    START[Component not starting]
-    A{SCC exists?}
-    B[Check operator logs]
-    C{Secret exists?}
-    D[Create secret]
-    E{Config ready?}
-    F[Fix PlatformConfig]
-    G[Check component status]
-
-    START --> A
-    A -->|No| B
-    A -->|Yes| C
-    C -->|No| D
-    C -->|Yes| E
-    E -->|No| F
-    E -->|Yes| G
+1. Check operator logs:
+```bash
+kubectl logs -n qualys -l control-plane=controller-manager
 ```
 
-### Common Issues
+2. Check SCC (OpenShift):
+```bash
+oc get scc | grep qualys
+```
 
-| Issue | Cause | Solution |
-|-------|-------|----------|
-| Pods pending | Missing SCC | Check operator logs for SCC creation errors |
-| CrashLoopBackOff | Invalid credentials | Verify ACTIVATION_ID and CUSTOMER_ID |
-| No data in Qualys | Network blocked | Check firewall rules for Qualys platform URLs |
-| ImagePullBackOff | Registry access | Configure imagePullSecrets |
-| Admission webhook errors | Service unavailable | Check admission controller pod logs |
+3. Verify credentials secret exists:
+```bash
+kubectl get secret qualys-credentials -n qualys
+```
 
-## Conclusion
+### Sensors Not Connecting to Qualys Platform
 
-The Qualys Nanny Operator simplifies deploying the complete Qualys security stack across OpenShift clusters by:
+1. Verify platform URLs are correct for your region
+2. Check sensor pod logs:
+```bash
+kubectl logs -n qualys -l app.kubernetes.io/component=container-sensor
+```
 
-- Managing five security components through two custom resources
-- Supporting component-level enable/disable toggles
-- Handling the complexity of privileged container configuration
-- Automatically managing OpenShift SCCs
-- Supporting both immutable (CoreOS) and traditional (RHEL) node operating systems
-- Providing Kubernetes-native status reporting through CR conditions
+3. Verify network connectivity to Qualys platform
 
-For more information, see the [Qualys Nanny GitHub repository](https://github.com/nelssec/qualys-nanny).
+### Admission Controller Issues
+
+1. Check webhook configuration:
+```bash
+kubectl get validatingwebhookconfigurations | grep qualys
+```
+
+2. Check admission controller logs:
+```bash
+kubectl logs -n qualys -l app.kubernetes.io/component=admission-controller
+```
+
+## Sample Configurations
+
+The operator includes sample configurations in `config/samples/`:
+
+| File | Description |
+|------|-------------|
+| `qualys_operator_platformconfig.yaml` | Platform configuration template |
+| `qualys_operator_containersecurity_recommended.yaml` | Recommended setup (standard mode) |
+| `qualys_operator_containersecurity_standard.yaml` | Full configuration with all options |
+| `qualys_operator_containersecurity_minimal.yaml` | Minimal privileges |
+| `qualys_operator_containersecurity_unprivileged.yaml` | Unprivileged mode |
+| `qualys_operator_containersecurity_privileged.yaml` | Full features + Runtime Sensor |
+
+## License
+
+Apache License 2.0

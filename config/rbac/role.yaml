@@ -8,7 +8,14 @@ rules:
   - ""
   resources:
   - configmaps
+  - endpoints
+  - namespaces
   - nodes
+  - nodes/status
+  - pods
+  - pods/exec
+  - pods/status
+  - replicationcontrollers/status
   - secrets
   - serviceaccounts
   - services
@@ -28,6 +35,13 @@ rules:
   - create
   - patch
 - apiGroups:
+  - '*'
+  resources:
+  - '*'
+  verbs:
+  - get
+  - list
+- apiGroups:
   - admissionregistration.k8s.io
   resources:
   - validatingwebhookconfigurations
@@ -43,7 +57,13 @@ rules:
   - apps
   resources:
   - daemonsets
+  - daemonsets/status
   - deployments
+  - deployments/status
+  - replicasets
+  - replicasets/status
+  - statefulsets
+  - statefulsets/status
   verbs:
   - create
   - delete
@@ -53,9 +73,46 @@ rules:
   - update
   - watch
 - apiGroups:
-  - qualys.qualys.io
+  - batch
   resources:
-  - qualyscloudagents
+  - cronjobs
+  - cronjobs/status
+  - jobs
+  - jobs/status
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - discovery.k8s.io
+  resources:
+  - endpointslices
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  - networkpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - podsecuritypolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - qualys.io
+  resources:
   - qualyscontainersecurities
   - qualysplatformconfigs
   verbs:
@@ -67,17 +124,15 @@ rules:
   - update
   - watch
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
-  - qualyscloudagents/finalizers
   - qualyscontainersecurities/finalizers
   - qualysplatformconfigs/finalizers
   verbs:
   - update
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
-  - qualyscloudagents/status
   - qualyscontainersecurities/status
   - qualysplatformconfigs/status
   verbs:
@@ -89,6 +144,8 @@ rules:
   resources:
   - clusterrolebindings
   - clusterroles
+  - rolebindings
+  - roles
   verbs:
   - create
   - delete
@@ -96,17 +153,4 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - security.openshift.io
-  resources:
-  - securitycontextconstraints
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - use
   - watch

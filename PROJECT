@@ -18,17 +18,8 @@ resources:
   domain: qualys.io
   group: qualys
   kind: QualysPlatformConfig
-  path: github.com/nelssec/qualys-nanny/api/v1alpha1
-  version: v1alpha1
-- api:
-    crdVersion: v1
-    namespaced: true
-  controller: true
-  domain: qualys.io
-  group: qualys
-  kind: QualysCloudAgent
-  path: github.com/nelssec/qualys-nanny/api/v1alpha1
-  version: v1alpha1
+  path: github.com/nelssec/qualys-nanny/api/v1
+  version: v1
 - api:
     crdVersion: v1
     namespaced: true
@@ -36,6 +27,6 @@ resources:
   domain: qualys.io
   group: qualys
   kind: QualysContainerSecurity
-  path: github.com/nelssec/qualys-nanny/api/v1alpha1
-  version: v1alpha1
+  path: github.com/nelssec/qualys-nanny/api/v1
+  version: v1
 version: "3"

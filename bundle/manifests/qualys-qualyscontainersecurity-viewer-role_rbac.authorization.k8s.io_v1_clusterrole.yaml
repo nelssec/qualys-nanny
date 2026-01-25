@@ -8,7 +8,7 @@ metadata:
   name: qualys-qualyscontainersecurity-viewer-role
 rules:
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualyscontainersecurities
   verbs:
@@ -16,7 +16,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualyscontainersecurities/status
   verbs:

@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -36,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	qualysv1alpha1 "github.com/nelssec/qualys-nanny/api/v1alpha1"
+	qualysv1 "github.com/nelssec/qualys-nanny/api/v1"
 	"github.com/nelssec/qualys-nanny/internal/credentials"
 	"github.com/nelssec/qualys-nanny/internal/platform"
 	"github.com/nelssec/qualys-nanny/internal/resources"
@@ -49,18 +50,24 @@ type QualysContainerSecurityReconciler struct {
 	DynamicClient dynamic.Interface
 }
 
-// +kubebuilder:rbac:groups=qualys.qualys.io,resources=qualyscontainersecurities,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=qualys.qualys.io,resources=qualyscontainersecurities/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=qualys.qualys.io,resources=qualyscontainersecurities/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=serviceaccounts;configmaps;secrets;nodes;services,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=apps,resources=daemonsets;deployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=qualys.io,resources=qualyscontainersecurities,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=qualys.io,resources=qualyscontainersecurities/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=qualys.io,resources=qualyscontainersecurities/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=serviceaccounts;configmaps;secrets;nodes;services;endpoints;namespaces,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=nodes/status;pods;pods/status;pods/exec;replicationcontrollers/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=daemonsets;daemonsets/status;deployments;deployments/status;replicasets;replicasets/status;statefulsets;statefulsets/status,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=batch,resources=jobs;jobs/status;cronjobs;cronjobs/status,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings;roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=validatingwebhookconfigurations,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=discovery.k8s.io,resources=endpointslices,verbs=get;list;watch
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses;networkpolicies,verbs=get;list;watch
+// +kubebuilder:rbac:groups=policy,resources=podsecuritypolicies,verbs=get;list;watch
+// +kubebuilder:rbac:groups="*",resources="*",verbs=get;list
 
 func (r *QualysContainerSecurityReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	sensor := &qualysv1alpha1.QualysContainerSecurity{}
+	sensor := &qualysv1.QualysContainerSecurity{}
 	err := r.Get(ctx, req.NamespacedName, sensor)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -75,11 +82,11 @@ func (r *QualysContainerSecurityReconciler) Reconcile(ctx context.Context, req c
 		sensor.Status.Conditions = []metav1.Condition{}
 	}
 
-	platformConfig := &qualysv1alpha1.QualysPlatformConfig{}
+	platformConfig := &qualysv1.QualysPlatformConfig{}
 	err = r.Get(ctx, types.NamespacedName{Name: sensor.Spec.PlatformConfigRef.Name}, platformConfig)
 	if err != nil {
 		log.Error(err, "Failed to get QualysPlatformConfig", "name", sensor.Spec.PlatformConfigRef.Name)
-		r.setCondition(sensor, qualysv1alpha1.ConditionTypeAvailable, metav1.ConditionFalse, "PlatformConfigNotFound", err.Error())
+		r.setCondition(sensor, qualysv1.ConditionTypeAvailable, metav1.ConditionFalse, "PlatformConfigNotFound", err.Error())
 		if updateErr := r.Status().Update(ctx, sensor); updateErr != nil {
 			log.Error(updateErr, "Failed to update status")
 		}
@@ -87,10 +94,10 @@ func (r *QualysContainerSecurityReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{RequeueAfter: RequeueIntervalError}, nil
 	}
 
-	credCond := qualysv1alpha1.GetCondition(platformConfig.Status.Conditions, qualysv1alpha1.ConditionTypeCredentialsReady)
+	credCond := qualysv1.GetCondition(platformConfig.Status.Conditions, qualysv1.ConditionTypeCredentialsReady)
 	if credCond == nil || credCond.Status != metav1.ConditionTrue {
 		log.Info("Credentials not ready, waiting")
-		r.setCondition(sensor, qualysv1alpha1.ConditionTypeAvailable, metav1.ConditionFalse, "CredentialsNotReady", "Waiting for QualysPlatformConfig credentials")
+		r.setCondition(sensor, qualysv1.ConditionTypeAvailable, metav1.ConditionFalse, "CredentialsNotReady", "Waiting for QualysPlatformConfig credentials")
 		if updateErr := r.Status().Update(ctx, sensor); updateErr != nil {
 			log.Error(updateErr, "Failed to update status")
 		}
@@ -101,7 +108,7 @@ func (r *QualysContainerSecurityReconciler) Reconcile(ctx context.Context, req c
 	secretRef, err := credResolver.GetSecretRef(platformConfig)
 	if err != nil {
 		log.Error(err, "Failed to get secret reference")
-		r.setCondition(sensor, qualysv1alpha1.ConditionTypeAvailable, metav1.ConditionFalse, "SecretRefError", err.Error())
+		r.setCondition(sensor, qualysv1.ConditionTypeAvailable, metav1.ConditionFalse, "SecretRefError", err.Error())
 		if updateErr := r.Status().Update(ctx, sensor); updateErr != nil {
 			log.Error(updateErr, "Failed to update status")
 		}
@@ -110,7 +117,7 @@ func (r *QualysContainerSecurityReconciler) Reconcile(ctx context.Context, req c
 
 	detectedRuntime := r.detectContainerRuntime(ctx, sensor)
 	sensor.Status.DetectedRuntime = string(detectedRuntime)
-	r.setCondition(sensor, qualysv1alpha1.ConditionTypeProgressing, metav1.ConditionTrue, "Reconciling", "Creating/updating resources")
+	r.setCondition(sensor, qualysv1.ConditionTypeProgressing, metav1.ConditionTrue, "Reconciling", "Creating/updating resources")
 
 	containerSensorCfg := sensor.Spec.GetContainerSensor()
 	if containerSensorCfg.Enabled {
@@ -167,7 +174,7 @@ func (r *QualysContainerSecurityReconciler) Reconcile(ctx context.Context, req c
 	return ctrl.Result{RequeueAfter: RequeueIntervalDefault}, nil
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileContainerSensor(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName string, rt platform.ContainerRuntime) error {
+func (r *QualysContainerSecurityReconciler) reconcileContainerSensor(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName string, rt platform.ContainerRuntime) error {
 	log := logf.FromContext(ctx)
 	baseName := sensor.Name + "-container"
 	serviceAccountName := baseName + "-sa"
@@ -175,6 +182,9 @@ func (r *QualysContainerSecurityReconciler) reconcileContainerSensor(ctx context
 	clusterRoleName := baseName + "-role"
 	clusterRoleBindingName := baseName + "-rolebinding"
 	sccName := baseName + "-scc"
+
+	containerSensorCfg := sensor.Spec.GetContainerSensor()
+	r.validatePrivilegeModeFeatures(sensor, &containerSensorCfg)
 
 	if err := r.reconcileServiceAccount(ctx, sensor, serviceAccountName, "container-sensor"); err != nil {
 		return err
@@ -192,23 +202,23 @@ func (r *QualysContainerSecurityReconciler) reconcileContainerSensor(ctx context
 		}
 	}
 
-	containerSensorCfg := sensor.Spec.GetContainerSensor()
 	if err := r.reconcileContainerSensorConfigMap(ctx, sensor, configMapName, platformConfig, containerSensorCfg); err != nil {
 		return err
 	}
-	if err := r.reconcileContainerSensorDaemonSet(ctx, sensor, secretName, serviceAccountName, rt); err != nil {
+	if err := r.reconcileContainerSensorDaemonSet(ctx, sensor, platformConfig, secretName, serviceAccountName, rt); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileClusterSensor(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName string) error {
+func (r *QualysContainerSecurityReconciler) reconcileClusterSensor(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName string) error {
 	log := logf.FromContext(ctx)
 	baseName := sensor.Name + "-cluster"
 	serviceAccountName := baseName + "-sa"
 	clusterRoleName := baseName + "-role"
 	clusterRoleBindingName := baseName + "-rolebinding"
+	sccName := baseName + "-scc"
 
 	if err := r.reconcileServiceAccount(ctx, sensor, serviceAccountName, "cluster-sensor"); err != nil {
 		return err
@@ -219,6 +229,11 @@ func (r *QualysContainerSecurityReconciler) reconcileClusterSensor(ctx context.C
 	if err := r.reconcileClusterRoleBinding(ctx, sensor, clusterRoleBindingName, serviceAccountName, clusterRoleName); err != nil {
 		return err
 	}
+	if platform.IsOpenShift(ctx) {
+		if err := r.reconcileClusterSensorSCC(ctx, sensor, sccName, serviceAccountName); err != nil {
+			log.Error(err, "Failed to reconcile Cluster Sensor SCC", "scc", sccName)
+		}
+	}
 
 	if err := r.reconcileClusterSensorDeployment(ctx, sensor, platformConfig, secretName, serviceAccountName); err != nil {
 		log.Error(err, "Failed to reconcile Cluster Sensor Deployment")
@@ -228,7 +243,7 @@ func (r *QualysContainerSecurityReconciler) reconcileClusterSensor(ctx context.C
 	return nil
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileAdmissionController(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName string) error {
+func (r *QualysContainerSecurityReconciler) reconcileAdmissionController(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName string) error {
 	log := logf.FromContext(ctx)
 	baseName := sensor.Name + "-admission"
 	serviceAccountName := baseName + "-sa"
@@ -263,13 +278,16 @@ func (r *QualysContainerSecurityReconciler) reconcileAdmissionController(ctx con
 	return nil
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensor(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName string, rt platform.ContainerRuntime) error {
+func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensor(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName string, rt platform.ContainerRuntime) error {
 	log := logf.FromContext(ctx)
 	baseName := sensor.Name + "-runtime"
 	serviceAccountName := baseName + "-sa"
 	clusterRoleName := baseName + "-role"
 	clusterRoleBindingName := baseName + "-rolebinding"
 	sccName := baseName + "-scc"
+
+	r.Recorder.Event(sensor, corev1.EventTypeWarning, "PrivilegedModeRequired",
+		"Runtime Sensor (eBPF) requires privileged mode for kernel tracing. This is the only sensor component that requires privileged: true.")
 
 	if err := r.reconcileServiceAccount(ctx, sensor, serviceAccountName, "runtime-sensor"); err != nil {
 		return err
@@ -294,33 +312,19 @@ func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensor(ctx context.C
 	return nil
 }
 
-func (r *QualysContainerSecurityReconciler) detectContainerRuntime(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity) platform.ContainerRuntime {
+func (r *QualysContainerSecurityReconciler) detectContainerRuntime(_ context.Context, sensor *qualysv1.QualysContainerSecurity) platform.ContainerRuntime {
 	runtimeConfig := sensor.Spec.GetContainerRuntime()
-	if runtimeConfig.Type != qualysv1alpha1.ContainerRuntimeAuto {
-		switch runtimeConfig.Type {
-		case qualysv1alpha1.ContainerRuntimeContainerd:
-			return platform.RuntimeContainerd
-		case qualysv1alpha1.ContainerRuntimeCRIO:
-			return platform.RuntimeCRIO
-		case qualysv1alpha1.ContainerRuntimeDocker:
-			return platform.RuntimeDocker
-		}
-	}
-
-	if platform.IsOpenShift(ctx) {
+	switch runtimeConfig.Type {
+	case qualysv1.ContainerRuntimeContainerd:
+		return platform.RuntimeContainerd
+	case qualysv1.ContainerRuntimeDocker:
+		return platform.RuntimeDocker
+	default:
 		return platform.RuntimeCRIO
 	}
-
-	nodeList := &corev1.NodeList{}
-	if err := r.List(ctx, nodeList, client.Limit(1)); err == nil && len(nodeList.Items) > 0 {
-		node := nodeList.Items[0]
-		return platform.DetectContainerRuntime(node.Status.NodeInfo.ContainerRuntimeVersion)
-	}
-
-	return platform.RuntimeUnknown
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileServiceAccount(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, name, component string) error {
+func (r *QualysContainerSecurityReconciler) reconcileServiceAccount(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name, component string) error {
 	sa := resources.BuildServiceAccount(name, sensor.Namespace, component)
 
 	if err := controllerutil.SetControllerReference(sensor, sa, r.Scheme); err != nil {
@@ -358,6 +362,22 @@ func (r *QualysContainerSecurityReconciler) reconcileContainerSensorClusterRole(
 }
 
 func (r *QualysContainerSecurityReconciler) reconcileClusterSensorClusterRole(ctx context.Context, name string) error {
+	rules := []rbacv1.PolicyRule{
+		{APIGroups: []string{""}, Resources: []string{"pods", "namespaces", "nodes", "services", "serviceaccounts"}, Verbs: []string{"watch"}},
+		{APIGroups: []string{"rbac.authorization.k8s.io"}, Resources: []string{"roles", "rolebindings", "clusterroles", "clusterrolebindings"}, Verbs: []string{"watch"}},
+		{APIGroups: []string{"discovery.k8s.io"}, Resources: []string{"endpointslices"}, Verbs: []string{"watch"}},
+		{APIGroups: []string{"networking.k8s.io"}, Resources: []string{"ingresses"}, Verbs: []string{"watch"}},
+		{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"get", "list"}},
+	}
+
+	if platform.IsOpenShift(ctx) {
+		rules = append(rules, rbacv1.PolicyRule{
+			APIGroups: []string{"security.openshift.io"},
+			Resources: []string{"securitycontextconstraints"},
+			Verbs:     []string{"create", "get", "list", "watch", "update", "patch", "delete"},
+		})
+	}
+
 	role := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -366,14 +386,7 @@ func (r *QualysContainerSecurityReconciler) reconcileClusterSensorClusterRole(ct
 				"app.kubernetes.io/component":  "cluster-sensor",
 			},
 		},
-		Rules: []rbacv1.PolicyRule{
-			{APIGroups: []string{""}, Resources: []string{"nodes", "namespaces", "pods", "services", "endpoints", "configmaps", "secrets", "serviceaccounts"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"apps"}, Resources: []string{"deployments", "daemonsets", "replicasets", "statefulsets"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"batch"}, Resources: []string{"jobs", "cronjobs"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"networking.k8s.io"}, Resources: []string{"networkpolicies", "ingresses"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"rbac.authorization.k8s.io"}, Resources: []string{"roles", "rolebindings", "clusterroles", "clusterrolebindings"}, Verbs: []string{"get", "list", "watch"}},
-			{APIGroups: []string{"policy"}, Resources: []string{"podsecuritypolicies"}, Verbs: []string{"get", "list", "watch"}},
-		},
+		Rules: rules,
 	}
 
 	existing := &rbacv1.ClusterRole{}
@@ -448,7 +461,7 @@ func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensorClusterRole(ct
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileClusterRoleBinding(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, name, serviceAccountName, clusterRoleName string) error {
+func (r *QualysContainerSecurityReconciler) reconcileClusterRoleBinding(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name, serviceAccountName, clusterRoleName string) error {
 	binding := resources.BuildContainerSensorClusterRoleBinding(name, sensor.Namespace, serviceAccountName, clusterRoleName)
 
 	existing := &rbacv1.ClusterRoleBinding{}
@@ -466,14 +479,15 @@ func (r *QualysContainerSecurityReconciler) reconcileClusterRoleBinding(ctx cont
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileContainerSensorSCC(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, name, serviceAccountName string) error {
+func (r *QualysContainerSecurityReconciler) reconcileContainerSensorSCC(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name, serviceAccountName string) error {
 	if r.DynamicClient == nil {
 		return fmt.Errorf("dynamic client not configured")
 	}
 
-	scc := resources.BuildContainerSensorSCC(name, sensor.Namespace, serviceAccountName)
+	cfg := sensor.Spec.GetContainerSensor()
+	scc := resources.BuildContainerSensorSCCWithPrivilegeMode(name, sensor.Namespace, serviceAccountName, cfg.PrivilegeMode)
 
-	_, err := r.DynamicClient.Resource(platform.SCCGVR).Get(ctx, name, metav1.GetOptions{})
+	existing, err := r.DynamicClient.Resource(platform.SCCGVR).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			_, err = r.DynamicClient.Resource(platform.SCCGVR).Create(ctx, scc, metav1.CreateOptions{})
@@ -482,18 +496,19 @@ func (r *QualysContainerSecurityReconciler) reconcileContainerSensorSCC(ctx cont
 		return err
 	}
 
+	scc.SetResourceVersion(existing.GetResourceVersion())
 	_, err = r.DynamicClient.Resource(platform.SCCGVR).Update(ctx, scc, metav1.UpdateOptions{})
 	return err
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensorSCC(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, name, serviceAccountName string) error {
+func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensorSCC(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name, serviceAccountName string) error {
 	if r.DynamicClient == nil {
 		return fmt.Errorf("dynamic client not configured")
 	}
 
-	scc := resources.BuildContainerSensorSCC(name, sensor.Namespace, serviceAccountName)
+	scc := resources.BuildRuntimeSensorSCC(name, sensor.Namespace, serviceAccountName)
 
-	_, err := r.DynamicClient.Resource(platform.SCCGVR).Get(ctx, name, metav1.GetOptions{})
+	existing, err := r.DynamicClient.Resource(platform.SCCGVR).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			_, err = r.DynamicClient.Resource(platform.SCCGVR).Create(ctx, scc, metav1.CreateOptions{})
@@ -502,11 +517,33 @@ func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensorSCC(ctx contex
 		return err
 	}
 
+	scc.SetResourceVersion(existing.GetResourceVersion())
 	_, err = r.DynamicClient.Resource(platform.SCCGVR).Update(ctx, scc, metav1.UpdateOptions{})
 	return err
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileContainerSensorConfigMap(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, name string, platformConfig *qualysv1alpha1.QualysPlatformConfig, sensorConfig qualysv1alpha1.ContainerSensorConfig) error {
+func (r *QualysContainerSecurityReconciler) reconcileClusterSensorSCC(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name, serviceAccountName string) error {
+	if r.DynamicClient == nil {
+		return fmt.Errorf("dynamic client not configured")
+	}
+
+	scc := resources.BuildClusterSensorSCC(name, sensor.Namespace, serviceAccountName)
+
+	existing, err := r.DynamicClient.Resource(platform.SCCGVR).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			_, err = r.DynamicClient.Resource(platform.SCCGVR).Create(ctx, scc, metav1.CreateOptions{})
+			return err
+		}
+		return err
+	}
+
+	scc.SetResourceVersion(existing.GetResourceVersion())
+	_, err = r.DynamicClient.Resource(platform.SCCGVR).Update(ctx, scc, metav1.UpdateOptions{})
+	return err
+}
+
+func (r *QualysContainerSecurityReconciler) reconcileContainerSensorConfigMap(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name string, platformConfig *qualysv1.QualysPlatformConfig, sensorConfig qualysv1.ContainerSensorConfig) error {
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -540,8 +577,8 @@ func (r *QualysContainerSecurityReconciler) reconcileContainerSensorConfigMap(ct
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileContainerSensorDaemonSet(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, secretName, serviceAccountName string, rt platform.ContainerRuntime) error {
-	ds := r.buildContainerSensorDaemonSet(sensor, secretName, serviceAccountName, rt)
+func (r *QualysContainerSecurityReconciler) reconcileContainerSensorDaemonSet(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string, rt platform.ContainerRuntime) error {
+	ds := r.buildContainerSensorDaemonSet(sensor, platformConfig, secretName, serviceAccountName, rt)
 
 	if err := controllerutil.SetControllerReference(sensor, ds, r.Scheme); err != nil {
 		return err
@@ -562,7 +599,7 @@ func (r *QualysContainerSecurityReconciler) reconcileContainerSensorDaemonSet(ct
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileClusterSensorDeployment(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName, serviceAccountName string) error {
+func (r *QualysContainerSecurityReconciler) reconcileClusterSensorDeployment(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string) error {
 	deploy := r.buildClusterSensorDeployment(sensor, platformConfig, secretName, serviceAccountName)
 
 	if err := controllerutil.SetControllerReference(sensor, deploy, r.Scheme); err != nil {
@@ -584,7 +621,7 @@ func (r *QualysContainerSecurityReconciler) reconcileClusterSensorDeployment(ctx
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileAdmissionService(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, name string) error {
+func (r *QualysContainerSecurityReconciler) reconcileAdmissionService(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name string) error {
 	svc := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -626,7 +663,7 @@ func (r *QualysContainerSecurityReconciler) reconcileAdmissionService(ctx contex
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileAdmissionDeployment(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName, serviceAccountName string) error {
+func (r *QualysContainerSecurityReconciler) reconcileAdmissionDeployment(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string) error {
 	deploy := r.buildAdmissionDeployment(sensor, platformConfig, secretName, serviceAccountName)
 
 	if err := controllerutil.SetControllerReference(sensor, deploy, r.Scheme); err != nil {
@@ -648,7 +685,7 @@ func (r *QualysContainerSecurityReconciler) reconcileAdmissionDeployment(ctx con
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileValidatingWebhook(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, name, serviceName string) error {
+func (r *QualysContainerSecurityReconciler) reconcileValidatingWebhook(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name, serviceName string) error {
 	admissionCfg := sensor.Spec.GetAdmissionController()
 	failurePolicy := admissionv1.Ignore
 	if admissionCfg.FailurePolicy == "Fail" {
@@ -706,7 +743,7 @@ func (r *QualysContainerSecurityReconciler) reconcileValidatingWebhook(ctx conte
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensorDaemonSet(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName, serviceAccountName string, rt platform.ContainerRuntime) error {
+func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensorDaemonSet(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string, rt platform.ContainerRuntime) error {
 	ds := r.buildRuntimeSensorDaemonSet(sensor, platformConfig, secretName, serviceAccountName, rt)
 
 	if err := controllerutil.SetControllerReference(sensor, ds, r.Scheme); err != nil {
@@ -728,7 +765,7 @@ func (r *QualysContainerSecurityReconciler) reconcileRuntimeSensorDaemonSet(ctx 
 	return r.Update(ctx, existing)
 }
 
-func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor *qualysv1alpha1.QualysContainerSecurity, secretName, serviceAccountName string, rt platform.ContainerRuntime) *appsv1.DaemonSet {
+func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string, rt platform.ContainerRuntime) *appsv1.DaemonSet {
 	cfg := sensor.Spec.GetContainerSensor()
 	scheduling := sensor.Spec.GetScheduling()
 
@@ -744,8 +781,8 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 	runtimeName := getRuntimeName(rt)
 
 	args := buildContainerSensorArgs(cfg, runtimeName)
-	envVars := buildContainerSensorEnvVars(secretName)
-	volumeMounts, volumes := buildContainerSensorVolumes(socketPath)
+	envVars := buildContainerSensorEnvVars(secretName, platformConfig.Spec.Platform.ServerUri)
+	volumeMounts, volumes := buildContainerSensorVolumes(socketPath, rt, cfg.PrivilegeMode)
 
 	var resourceReqs corev1.ResourceRequirements
 	if cfg.Resources != nil {
@@ -755,6 +792,16 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 	maxUnavailable := intstr.FromString("25%")
 	if cfg.UpdateStrategy != nil && cfg.UpdateStrategy.RollingUpdate != nil {
 		maxUnavailable = intstr.FromString(cfg.UpdateStrategy.RollingUpdate.MaxUnavailable)
+	}
+
+	securityContext := buildContainerSensorSecurityContext(&cfg)
+	podSecurityContext := buildContainerSensorPodSecurityContext(&cfg, rt)
+	hostNetwork := cfg.GetEffectiveHostNetwork()
+	hostPID := cfg.GetEffectiveHostPID()
+
+	dnsPolicy := corev1.DNSClusterFirst
+	if hostNetwork {
+		dnsPolicy = corev1.DNSClusterFirstWithHostNet
 	}
 
 	return &appsv1.DaemonSet{
@@ -773,27 +820,25 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            serviceAccountName,
-					HostNetwork:                   true,
-					HostPID:                       true,
+					HostNetwork:                   hostNetwork,
+					HostPID:                       hostPID,
 					PriorityClassName:             scheduling.PriorityClassName,
 					NodeSelector:                  scheduling.NodeSelector,
 					Tolerations:                   scheduling.Tolerations,
 					Affinity:                      scheduling.Affinity,
 					RestartPolicy:                 corev1.RestartPolicyAlways,
-					DNSPolicy:                     corev1.DNSClusterFirstWithHostNet,
+					DNSPolicy:                     dnsPolicy,
 					TerminationGracePeriodSeconds: int64Ptr(30),
+					SecurityContext:               podSecurityContext,
 					Containers: []corev1.Container{{
-						Name:            "container-sensor",
+						Name:            "qualys-container-sensor",
 						Image:           fmt.Sprintf("%s:%s", cfg.Image.Repository, cfg.Image.Tag),
 						ImagePullPolicy: cfg.Image.PullPolicy,
 						Args:            args,
 						Env:             envVars,
 						VolumeMounts:    volumeMounts,
-						SecurityContext: &corev1.SecurityContext{
-							Privileged:               boolPtr(true),
-							AllowPrivilegeEscalation: boolPtr(true),
-						},
-						Resources: resourceReqs,
+						SecurityContext: securityContext,
+						Resources:       resourceReqs,
 					}},
 					Volumes:          volumes,
 					ImagePullSecrets: cfg.Image.PullSecrets,
@@ -803,7 +848,99 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 	}
 }
 
-func (r *QualysContainerSecurityReconciler) buildClusterSensorDeployment(sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName, serviceAccountName string) *appsv1.Deployment {
+func buildContainerSensorSecurityContext(cfg *qualysv1.ContainerSensorConfig) *corev1.SecurityContext {
+	seccompProfile := &corev1.SeccompProfile{
+		Type: cfg.GetEffectiveSeccompProfile(),
+	}
+
+	switch cfg.PrivilegeMode {
+	case qualysv1.PrivilegeModeUnprivileged:
+		return &corev1.SecurityContext{
+			Privileged:               boolPtr(false),
+			RunAsUser:                cfg.GetEffectiveRunAsUser(),
+			RunAsGroup:               cfg.GetEffectiveRunAsGroup(),
+			RunAsNonRoot:             boolPtr(true),
+			AllowPrivilegeEscalation: boolPtr(false),
+			ReadOnlyRootFilesystem:   boolPtr(cfg.GetEffectiveReadOnlyRootFilesystem()),
+			SeccompProfile:           seccompProfile,
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		}
+
+	case qualysv1.PrivilegeModeMinimal:
+		return &corev1.SecurityContext{
+			Privileged:               boolPtr(false),
+			RunAsUser:                int64Ptr(0),
+			RunAsNonRoot:             boolPtr(false),
+			AllowPrivilegeEscalation: boolPtr(false),
+			ReadOnlyRootFilesystem:   boolPtr(cfg.GetEffectiveReadOnlyRootFilesystem()),
+			SeccompProfile:           seccompProfile,
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+				Add:  []corev1.Capability{"SYS_PTRACE"},
+			},
+		}
+
+	case qualysv1.PrivilegeModePrivileged:
+		return &corev1.SecurityContext{
+			Privileged:               boolPtr(true),
+			RunAsUser:                int64Ptr(0),
+			RunAsNonRoot:             boolPtr(false),
+			AllowPrivilegeEscalation: boolPtr(true),
+			ReadOnlyRootFilesystem:   boolPtr(false),
+		}
+
+	default:
+		return &corev1.SecurityContext{
+			Privileged:               boolPtr(false),
+			RunAsUser:                int64Ptr(0),
+			RunAsNonRoot:             boolPtr(false),
+			AllowPrivilegeEscalation: boolPtr(true),
+			ReadOnlyRootFilesystem:   boolPtr(false),
+			SeccompProfile:           seccompProfile,
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+				Add: []corev1.Capability{
+					"SYS_ADMIN",
+					"SYS_PTRACE",
+					"SYS_CHROOT",
+					"DAC_READ_SEARCH",
+				},
+			},
+		}
+	}
+}
+
+func buildContainerSensorPodSecurityContext(cfg *qualysv1.ContainerSensorConfig, rt platform.ContainerRuntime) *corev1.PodSecurityContext {
+	psc := &corev1.PodSecurityContext{}
+
+	if cfg.PrivilegeMode == qualysv1.PrivilegeModeUnprivileged {
+		psc.RunAsNonRoot = boolPtr(true)
+		psc.RunAsUser = cfg.GetEffectiveRunAsUser()
+		psc.RunAsGroup = cfg.GetEffectiveRunAsGroup()
+
+		socketGID := cfg.GetRuntimeSocketGroup()
+		if socketGID == nil {
+			defaultGID := getDefaultSocketGID(rt)
+			socketGID = &defaultGID
+		}
+		psc.SupplementalGroups = []int64{*socketGID}
+		psc.FSGroup = socketGID
+
+		psc.SeccompProfile = &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		}
+	}
+
+	return psc
+}
+
+func getDefaultSocketGID(_ platform.ContainerRuntime) int64 {
+	return 0
+}
+
+func (r *QualysContainerSecurityReconciler) buildClusterSensorDeployment(sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string) *appsv1.Deployment {
 	cfg := sensor.Spec.GetClusterSensor()
 
 	labels := map[string]string{
@@ -816,6 +953,41 @@ func (r *QualysContainerSecurityReconciler) buildClusterSensorDeployment(sensor 
 	var resourceReqs corev1.ResourceRequirements
 	if cfg.Resources != nil {
 		resourceReqs = *cfg.Resources
+	} else {
+		resourceReqs = corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("500m"),
+				corev1.ResourceMemory: resource.MustParse("750Mi"),
+			},
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("200m"),
+				corev1.ResourceMemory: resource.MustParse("256Mi"),
+			},
+		}
+	}
+
+	args := r.buildClusterSensorArgs(cfg, platformConfig)
+
+	isOpenShift := platform.IsOpenShift(context.Background())
+
+	hostScannerEnabled := cfg.HostScanner != nil && cfg.HostScanner.Enabled
+	hostScannerRunOnMaster := cfg.HostScanner != nil && cfg.HostScanner.RunOnMaster
+
+	args = append(args, fmt.Sprintf("--openshift=%t", isOpenShift))
+	args = append(args, fmt.Sprintf("--enable-k8s-compliance=%t", cfg.K8sCompliance))
+	args = append(args, fmt.Sprintf("--host-scanner-enable=%t", hostScannerEnabled))
+	args = append(args, fmt.Sprintf("--host-scanner-run-on-master=%t", hostScannerRunOnMaster))
+
+	if hostScannerEnabled && cfg.HostScanner.Resources != nil {
+		if cpu := cfg.HostScanner.Resources.Limits.Cpu(); cpu != nil {
+			args = append(args, "--host-scanner-cpu-limit", cpu.String())
+		}
+		if mem := cfg.HostScanner.Resources.Limits.Memory(); mem != nil {
+			args = append(args, "--host-scanner-memory-limit", mem.String())
+		}
+	} else if hostScannerEnabled {
+		args = append(args, "--host-scanner-cpu-limit", "100m")
+		args = append(args, "--host-scanner-memory-limit", "256Mi")
 	}
 
 	return &appsv1.Deployment{
@@ -830,15 +1002,25 @@ func (r *QualysContainerSecurityReconciler) buildClusterSensorDeployment(sensor 
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
-					ServiceAccountName: serviceAccountName,
+					ServiceAccountName:            serviceAccountName,
+					TerminationGracePeriodSeconds: int64Ptr(120),
+					SecurityContext: &corev1.PodSecurityContext{
+						FSGroup: int64Ptr(555),
+					},
 					Containers: []corev1.Container{{
-						Name:            "cluster-sensor",
+						Name:            "qualys-cluster-sensor",
 						Image:           fmt.Sprintf("%s:%s", cfg.Image.Repository, cfg.Image.Tag),
 						ImagePullPolicy: cfg.Image.PullPolicy,
+						Args:            args,
+						SecurityContext: &corev1.SecurityContext{
+							RunAsUser:                int64Ptr(555),
+							RunAsGroup:               int64Ptr(555),
+							RunAsNonRoot:             boolPtr(true),
+							AllowPrivilegeEscalation: boolPtr(false),
+						},
 						Env: []corev1.EnvVar{
-							{Name: "ACTIVATIONID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "ACTIVATION_ID"}}},
-							{Name: "CUSTOMERID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "CUSTOMER_ID"}}},
-							{Name: "QUALYS_GATEWAY_URL", Value: platformConfig.Spec.Platform.ServerUri},
+							{Name: "CLUSTERSENSOR_POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
+							{Name: "CLUSTERSENSOR_POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
 						},
 						Resources: resourceReqs,
 					}},
@@ -849,7 +1031,73 @@ func (r *QualysContainerSecurityReconciler) buildClusterSensorDeployment(sensor 
 	}
 }
 
-func (r *QualysContainerSecurityReconciler) buildAdmissionDeployment(sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName, serviceAccountName string) *appsv1.Deployment {
+func (r *QualysContainerSecurityReconciler) buildClusterSensorArgs(cfg qualysv1.ClusterSensorConfig, platformConfig *qualysv1.QualysPlatformConfig) []string {
+	credResolver := credentials.NewResolver(r.Client)
+	creds, _ := credResolver.Resolve(context.Background(), platformConfig)
+
+	gatewayUrl := platformConfig.Spec.Platform.GatewayUrl
+	if gatewayUrl == "" {
+		gatewayUrl = platformConfig.Spec.Platform.ServerUri
+	}
+
+	args := []string{
+		"--customer-id", creds.CustomerID,
+		"--activation-id", creds.ActivationID,
+		"--gateway-url", gatewayUrl,
+	}
+
+	if cfg.Logging != nil {
+		logLevel := "info"
+		switch cfg.Logging.LogLevel {
+		case 0, 1:
+			logLevel = "error"
+		case 2:
+			logLevel = "warn"
+		case 3:
+			logLevel = "info"
+		case 4, 5:
+			logLevel = "debug"
+		}
+		args = append(args, "--log-level", logLevel)
+	}
+
+	args = append(args, "--cloud-provider", string(cfg.CloudProvider))
+
+	switch cfg.CloudProvider {
+	case qualysv1.CloudProviderAWS:
+		if cfg.ClusterID != "" {
+			args = append(args, "--cluster-id", cfg.ClusterID)
+		}
+	case qualysv1.CloudProviderAzure:
+		if cfg.ClusterID != "" {
+			args = append(args, "--cluster-id", cfg.ClusterID)
+		}
+		if cfg.ClusterRegion != "" {
+			args = append(args, "--cluster-region", cfg.ClusterRegion)
+		}
+	case qualysv1.CloudProviderGCP:
+		if cfg.ClusterID != "" {
+			args = append(args, "--cluster-id", cfg.ClusterID)
+		}
+	case qualysv1.CloudProviderOCI:
+		if cfg.ClusterID != "" {
+			args = append(args, "--cluster-id", cfg.ClusterID)
+		}
+		if cfg.ClusterName != "" {
+			args = append(args, "--cluster-name", cfg.ClusterName)
+		}
+	case qualysv1.CloudProviderSelfManagedK8S:
+		if cfg.ClusterName != "" {
+			args = append(args, "--cluster-name", cfg.ClusterName)
+		}
+	}
+
+	args = append(args, cfg.ExtraArgs...)
+
+	return args
+}
+
+func (r *QualysContainerSecurityReconciler) buildAdmissionDeployment(sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string) *appsv1.Deployment {
 	cfg := sensor.Spec.GetAdmissionController()
 
 	labels := map[string]string{
@@ -896,9 +1144,10 @@ func (r *QualysContainerSecurityReconciler) buildAdmissionDeployment(sensor *qua
 	}
 }
 
-func (r *QualysContainerSecurityReconciler) buildRuntimeSensorDaemonSet(sensor *qualysv1alpha1.QualysContainerSecurity, platformConfig *qualysv1alpha1.QualysPlatformConfig, secretName, serviceAccountName string, _ platform.ContainerRuntime) *appsv1.DaemonSet {
+func (r *QualysContainerSecurityReconciler) buildRuntimeSensorDaemonSet(sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string, rt platform.ContainerRuntime) *appsv1.DaemonSet {
 	cfg := sensor.Spec.GetRuntimeSensor()
 	scheduling := sensor.Spec.GetScheduling()
+	clusterCfg := sensor.Spec.GetClusterSensor()
 
 	labels := map[string]string{
 		"app.kubernetes.io/name":       "qualys-runtime-sensor",
@@ -910,11 +1159,41 @@ func (r *QualysContainerSecurityReconciler) buildRuntimeSensorDaemonSet(sensor *
 	var resourceReqs corev1.ResourceRequirements
 	if cfg.Resources != nil {
 		resourceReqs = *cfg.Resources
+	} else {
+		resourceReqs = corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("800m"),
+				corev1.ResourceMemory: resource.MustParse("1024Mi"),
+			},
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("500m"),
+				corev1.ResourceMemory: resource.MustParse("1024Mi"),
+			},
+		}
 	}
 
 	maxUnavailable := intstr.FromString("25%")
 	if cfg.UpdateStrategy != nil && cfg.UpdateStrategy.RollingUpdate != nil {
 		maxUnavailable = intstr.FromString(cfg.UpdateStrategy.RollingUpdate.MaxUnavailable)
+	}
+
+	args := r.buildRuntimeSensorArgs(cfg, clusterCfg, platformConfig)
+
+	volumeMounts := []corev1.VolumeMount{
+		{Name: "proc-root", MountPath: "/procRoot/", ReadOnly: true},
+	}
+	volumes := []corev1.Volume{
+		{Name: "proc-root", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc", Type: hostPathTypePtr(corev1.HostPathDirectory)}}},
+	}
+
+	if rt == platform.RuntimeCRIO {
+		runtimeConfig := sensor.Spec.GetContainerRuntime()
+		socketPath := "/var/run/crio/crio.sock"
+		if runtimeConfig.SocketPaths != nil && runtimeConfig.SocketPaths.CRIO != "" {
+			socketPath = runtimeConfig.SocketPaths.CRIO
+		}
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "socket-volume", MountPath: socketPath, ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{Name: "socket-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: hostPathTypePtr(corev1.HostPathSocket)}}})
 	}
 
 	return &appsv1.DaemonSet{
@@ -934,7 +1213,6 @@ func (r *QualysContainerSecurityReconciler) buildRuntimeSensorDaemonSet(sensor *
 				Spec: corev1.PodSpec{
 					ServiceAccountName:            serviceAccountName,
 					HostNetwork:                   true,
-					HostPID:                       true,
 					PriorityClassName:             scheduling.PriorityClassName,
 					NodeSelector:                  scheduling.NodeSelector,
 					Tolerations:                   scheduling.Tolerations,
@@ -943,28 +1221,25 @@ func (r *QualysContainerSecurityReconciler) buildRuntimeSensorDaemonSet(sensor *
 					DNSPolicy:                     corev1.DNSClusterFirstWithHostNet,
 					TerminationGracePeriodSeconds: int64Ptr(30),
 					Containers: []corev1.Container{{
-						Name:            "runtime-sensor",
+						Name:            "qualys-runtime-sensor",
 						Image:           fmt.Sprintf("%s:%s", cfg.Image.Repository, cfg.Image.Tag),
 						ImagePullPolicy: cfg.Image.PullPolicy,
+						Args:            args,
 						Env: []corev1.EnvVar{
-							{Name: "ACTIVATIONID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "ACTIVATION_ID"}}},
-							{Name: "CUSTOMERID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "CUSTOMER_ID"}}},
-							{Name: "QUALYS_GATEWAY_URL", Value: platformConfig.Spec.Platform.ServerUri},
+							{Name: "NODE_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}}},
+							{Name: "QUALYS_POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
+							{Name: "QUALYS_POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
 						},
 						SecurityContext: &corev1.SecurityContext{
 							Privileged:               boolPtr(true),
+							RunAsUser:                int64Ptr(0),
+							RunAsNonRoot:             boolPtr(false),
 							AllowPrivilegeEscalation: boolPtr(true),
 						},
-						Resources: resourceReqs,
-						VolumeMounts: []corev1.VolumeMount{
-							{Name: "sys-kernel-debug", MountPath: "/sys/kernel/debug"},
-							{Name: "proc", MountPath: "/host/proc", ReadOnly: true},
-						},
+						Resources:    resourceReqs,
+						VolumeMounts: volumeMounts,
 					}},
-					Volumes: []corev1.Volume{
-						{Name: "sys-kernel-debug", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/debug"}}},
-						{Name: "proc", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc"}}},
-					},
+					Volumes:          volumes,
 					ImagePullSecrets: cfg.Image.PullSecrets,
 				},
 			},
@@ -972,7 +1247,75 @@ func (r *QualysContainerSecurityReconciler) buildRuntimeSensorDaemonSet(sensor *
 	}
 }
 
-func (r *QualysContainerSecurityReconciler) cleanupContainerSensor(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity) error {
+func (r *QualysContainerSecurityReconciler) buildRuntimeSensorArgs(cfg qualysv1.RuntimeSensorConfig, clusterCfg qualysv1.ClusterSensorConfig, platformConfig *qualysv1.QualysPlatformConfig) []string {
+	credResolver := credentials.NewResolver(r.Client)
+	creds, _ := credResolver.Resolve(context.Background(), platformConfig)
+
+	gatewayUrl := platformConfig.Spec.Platform.GatewayUrl
+	if gatewayUrl == "" {
+		gatewayUrl = platformConfig.Spec.Platform.ServerUri
+	}
+
+	args := []string{
+		"--customer-id", creds.CustomerID,
+		"--activation-id", creds.ActivationID,
+		"--gateway-url", gatewayUrl,
+	}
+
+	if cfg.Logging != nil {
+		logLevel := "info"
+		switch cfg.Logging.LogLevel {
+		case 0, 1:
+			logLevel = "error"
+		case 2:
+			logLevel = "warn"
+		case 3:
+			logLevel = "info"
+		case 4, 5:
+			logLevel = "debug"
+		}
+		args = append(args, "--log-level", logLevel)
+	}
+
+	args = append(args, "--cloud-provider", string(clusterCfg.CloudProvider))
+
+	switch clusterCfg.CloudProvider {
+	case qualysv1.CloudProviderAWS:
+		if clusterCfg.ClusterID != "" {
+			args = append(args, "--cluster-id", clusterCfg.ClusterID)
+		}
+	case qualysv1.CloudProviderAzure:
+		if clusterCfg.ClusterID != "" {
+			args = append(args, "--cluster-id", clusterCfg.ClusterID)
+		}
+		if clusterCfg.ClusterRegion != "" {
+			args = append(args, "--cluster-region", clusterCfg.ClusterRegion)
+		}
+	case qualysv1.CloudProviderGCP:
+		if clusterCfg.ClusterID != "" {
+			args = append(args, "--cluster-id", clusterCfg.ClusterID)
+		}
+	case qualysv1.CloudProviderOCI:
+		if clusterCfg.ClusterID != "" {
+			args = append(args, "--cluster-id", clusterCfg.ClusterID)
+		}
+		if clusterCfg.ClusterName != "" {
+			args = append(args, "--cluster-name", clusterCfg.ClusterName)
+		}
+	case qualysv1.CloudProviderSelfManagedK8S:
+		if clusterCfg.ClusterName != "" {
+			args = append(args, "--cluster-name", clusterCfg.ClusterName)
+		}
+	}
+
+	args = append(args, cfg.ExtraArgs...)
+
+	return args
+}
+
+func hostPathTypePtr(t corev1.HostPathType) *corev1.HostPathType { return &t }
+
+func (r *QualysContainerSecurityReconciler) cleanupContainerSensor(ctx context.Context, sensor *qualysv1.QualysContainerSecurity) error {
 	dsName := sensor.Name + "-container"
 	ds := &appsv1.DaemonSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: dsName, Namespace: sensor.Namespace}, ds); err == nil {
@@ -983,7 +1326,7 @@ func (r *QualysContainerSecurityReconciler) cleanupContainerSensor(ctx context.C
 	return nil
 }
 
-func (r *QualysContainerSecurityReconciler) cleanupClusterSensor(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity) error {
+func (r *QualysContainerSecurityReconciler) cleanupClusterSensor(ctx context.Context, sensor *qualysv1.QualysContainerSecurity) error {
 	deployName := sensor.Name + "-cluster"
 	deploy := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Name: deployName, Namespace: sensor.Namespace}, deploy); err == nil {
@@ -994,7 +1337,7 @@ func (r *QualysContainerSecurityReconciler) cleanupClusterSensor(ctx context.Con
 	return nil
 }
 
-func (r *QualysContainerSecurityReconciler) cleanupAdmissionController(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity) error {
+func (r *QualysContainerSecurityReconciler) cleanupAdmissionController(ctx context.Context, sensor *qualysv1.QualysContainerSecurity) error {
 	deployName := sensor.Name + "-admission"
 	deploy := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Name: deployName, Namespace: sensor.Namespace}, deploy); err == nil {
@@ -1013,7 +1356,7 @@ func (r *QualysContainerSecurityReconciler) cleanupAdmissionController(ctx conte
 	return nil
 }
 
-func (r *QualysContainerSecurityReconciler) cleanupRuntimeSensor(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity) error {
+func (r *QualysContainerSecurityReconciler) cleanupRuntimeSensor(ctx context.Context, sensor *qualysv1.QualysContainerSecurity) error {
 	dsName := sensor.Name + "-runtime"
 	ds := &appsv1.DaemonSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: dsName, Namespace: sensor.Namespace}, ds); err == nil {
@@ -1024,7 +1367,7 @@ func (r *QualysContainerSecurityReconciler) cleanupRuntimeSensor(ctx context.Con
 	return nil
 }
 
-func (r *QualysContainerSecurityReconciler) updateComponentStatuses(ctx context.Context, sensor *qualysv1alpha1.QualysContainerSecurity) error {
+func (r *QualysContainerSecurityReconciler) updateComponentStatuses(ctx context.Context, sensor *qualysv1.QualysContainerSecurity) error {
 	containerSensorCfg := sensor.Spec.GetContainerSensor()
 	sensor.Status.ContainerSensor = r.getDaemonSetComponentStatus(ctx, sensor.Name+"-container", sensor.Namespace, containerSensorCfg.Enabled)
 
@@ -1045,19 +1388,19 @@ func (r *QualysContainerSecurityReconciler) updateComponentStatuses(ctx context.
 		isComponentReady(sensor.Status.RuntimeSensor)
 
 	if allReady {
-		r.setCondition(sensor, qualysv1alpha1.ConditionTypeAvailable, metav1.ConditionTrue, "AllComponentsReady", "All enabled components are ready")
-		r.setCondition(sensor, qualysv1alpha1.ConditionTypeProgressing, metav1.ConditionFalse, "DeploymentComplete", "Rollout complete")
-		r.setCondition(sensor, qualysv1alpha1.ConditionTypeDegraded, metav1.ConditionFalse, "AllComponentsHealthy", "No degraded components")
+		r.setCondition(sensor, qualysv1.ConditionTypeAvailable, metav1.ConditionTrue, "AllComponentsReady", "All enabled components are ready")
+		r.setCondition(sensor, qualysv1.ConditionTypeProgressing, metav1.ConditionFalse, "DeploymentComplete", "Rollout complete")
+		r.setCondition(sensor, qualysv1.ConditionTypeDegraded, metav1.ConditionFalse, "AllComponentsHealthy", "No degraded components")
 	} else {
-		r.setCondition(sensor, qualysv1alpha1.ConditionTypeAvailable, metav1.ConditionFalse, "ComponentsNotReady", "Some components are not ready")
-		r.setCondition(sensor, qualysv1alpha1.ConditionTypeProgressing, metav1.ConditionTrue, "RollingOut", "Components rolling out")
+		r.setCondition(sensor, qualysv1.ConditionTypeAvailable, metav1.ConditionFalse, "ComponentsNotReady", "Some components are not ready")
+		r.setCondition(sensor, qualysv1.ConditionTypeProgressing, metav1.ConditionTrue, "RollingOut", "Components rolling out")
 	}
 
 	return r.Status().Update(ctx, sensor)
 }
 
-func (r *QualysContainerSecurityReconciler) getDaemonSetComponentStatus(ctx context.Context, name, namespace string, enabled bool) *qualysv1alpha1.ComponentStatus {
-	status := &qualysv1alpha1.ComponentStatus{Enabled: enabled}
+func (r *QualysContainerSecurityReconciler) getDaemonSetComponentStatus(ctx context.Context, name, namespace string, enabled bool) *qualysv1.ComponentStatus {
+	status := &qualysv1.ComponentStatus{Enabled: enabled}
 	if !enabled {
 		return status
 	}
@@ -1080,8 +1423,8 @@ func (r *QualysContainerSecurityReconciler) getDaemonSetComponentStatus(ctx cont
 	return status
 }
 
-func (r *QualysContainerSecurityReconciler) getDeploymentComponentStatus(ctx context.Context, name, namespace string, enabled bool) *qualysv1alpha1.ComponentStatus {
-	status := &qualysv1alpha1.ComponentStatus{Enabled: enabled}
+func (r *QualysContainerSecurityReconciler) getDeploymentComponentStatus(ctx context.Context, name, namespace string, enabled bool) *qualysv1.ComponentStatus {
+	status := &qualysv1.ComponentStatus{Enabled: enabled}
 	if !enabled {
 		return status
 	}
@@ -1104,7 +1447,7 @@ func (r *QualysContainerSecurityReconciler) getDeploymentComponentStatus(ctx con
 	return status
 }
 
-func (r *QualysContainerSecurityReconciler) setCondition(sensor *qualysv1alpha1.QualysContainerSecurity, conditionType string, status metav1.ConditionStatus, reason, message string) {
+func (r *QualysContainerSecurityReconciler) setCondition(sensor *qualysv1.QualysContainerSecurity, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	condition := metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
@@ -1112,12 +1455,52 @@ func (r *QualysContainerSecurityReconciler) setCondition(sensor *qualysv1alpha1.
 		Reason:             reason,
 		Message:            message,
 	}
-	qualysv1alpha1.SetCondition(&sensor.Status.Conditions, condition)
+	qualysv1.SetCondition(&sensor.Status.Conditions, condition)
+}
+
+func (r *QualysContainerSecurityReconciler) validatePrivilegeModeFeatures(sensor *qualysv1.QualysContainerSecurity, cfg *qualysv1.ContainerSensorConfig) {
+	if cfg.Scanning == nil {
+		return
+	}
+
+	switch cfg.PrivilegeMode {
+	case qualysv1.PrivilegeModeUnprivileged:
+		if cfg.Scanning.EnableContainerScan {
+			r.Recorder.Event(sensor, corev1.EventTypeWarning, "FeatureDisabled",
+				"Container scanning requires 'minimal' or 'standard' privilege mode. Container scanning will be disabled in 'unprivileged' mode.")
+		}
+		if cfg.Scanning.EnableMalwareDetection {
+			r.Recorder.Event(sensor, corev1.EventTypeWarning, "FeatureDisabled",
+				"Malware detection requires 'standard' privilege mode. Malware detection will be disabled in 'unprivileged' mode.")
+		}
+		if cfg.Scanning.EnableSecretDetection {
+			r.Recorder.Event(sensor, corev1.EventTypeWarning, "FeatureDisabled",
+				"Secret detection in containers requires 'minimal' or 'standard' privilege mode. Only image-based secret detection is available in 'unprivileged' mode.")
+		}
+		r.Recorder.Event(sensor, corev1.EventTypeNormal, "UnprivilegedMode",
+			"Running in unprivileged mode (Pod Security Standards: restricted). Only image vulnerability scanning via CRI API is available.")
+
+	case qualysv1.PrivilegeModeMinimal:
+		if cfg.Scanning.EnableMalwareDetection {
+			r.Recorder.Event(sensor, corev1.EventTypeWarning, "FeatureDisabled",
+				"Malware detection requires 'standard' privilege mode. Malware detection will be disabled in 'minimal' mode.")
+		}
+		r.Recorder.Event(sensor, corev1.EventTypeNormal, "MinimalMode",
+			"Running in minimal privilege mode (Pod Security Standards: baseline). Image and container scanning available, no malware detection.")
+
+	case qualysv1.PrivilegeModeStandard:
+		r.Recorder.Event(sensor, corev1.EventTypeNormal, "StandardMode",
+			"Running in standard privilege mode with specific capabilities (privileged: false). All scanning features available. This is the recommended configuration.")
+
+	case qualysv1.PrivilegeModePrivileged:
+		r.Recorder.Event(sensor, corev1.EventTypeWarning, "PrivilegedMode",
+			"Running in privileged mode (privileged: true). Consider using 'standard' mode instead which provides the same functionality without privileged containers.")
+	}
 }
 
 func (r *QualysContainerSecurityReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&qualysv1alpha1.QualysContainerSecurity{}).
+		For(&qualysv1.QualysContainerSecurity{}).
 		Owns(&appsv1.DaemonSet{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.ServiceAccount{}).
@@ -1127,7 +1510,7 @@ func (r *QualysContainerSecurityReconciler) SetupWithManager(mgr ctrl.Manager) e
 		Complete(r)
 }
 
-func buildContainerSensorArgs(cfg qualysv1alpha1.ContainerSensorConfig, runtimeName string) []string {
+func buildContainerSensorArgs(cfg qualysv1.ContainerSensorConfig, runtimeName string) []string {
 	args := []string{}
 	if cfg.K8sMode {
 		args = append(args, "--k8s-mode")
@@ -1136,9 +1519,9 @@ func buildContainerSensorArgs(cfg qualysv1alpha1.ContainerSensorConfig, runtimeN
 		args = append(args, "--container-runtime", runtimeName)
 	}
 	switch cfg.Mode {
-	case qualysv1alpha1.ContainerSensorModeCICD:
+	case qualysv1.ContainerSensorModeCICD:
 		args = append(args, "--cicd-deployed-sensor")
-	case qualysv1alpha1.ContainerSensorModeRegistry:
+	case qualysv1.ContainerSensorModeRegistry:
 		args = append(args, "--registry-sensor")
 	}
 	if cfg.Logging != nil {
@@ -1154,39 +1537,107 @@ func buildContainerSensorArgs(cfg qualysv1alpha1.ContainerSensorConfig, runtimeN
 		if !cfg.Scanning.EnableContainerScan {
 			args = append(args, "--disableContainerScan")
 		}
+		if cfg.Scanning.EnableScaScan {
+			args = append(args, "--perform-sca-scan")
+		}
 	}
 	args = append(args, cfg.ExtraArgs...)
 	return args
 }
 
-func buildContainerSensorEnvVars(secretName string) []corev1.EnvVar {
+func buildContainerSensorEnvVars(secretName, serverUri string) []corev1.EnvVar {
 	return []corev1.EnvVar{
-		{Name: "ACTIVATIONID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "ACTIVATION_ID"}}},
 		{Name: "CUSTOMERID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "CUSTOMER_ID"}}},
-		{Name: "POD_URL", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.podIP"}}},
+		{Name: "ACTIVATIONID", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: secretName}, Key: "ACTIVATION_ID"}}},
+		{Name: "POD_URL", Value: serverUri},
+		{Name: "QUALYS_SCANNING_CONTAINER_LAUNCH_TIMEOUT", Value: "10"},
+		{Name: "QUALYS_POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
+		{Name: "QUALYS_POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
+		{Name: "QUALYS_SENSOR_HOST_IP", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.hostIP"}}},
 	}
 }
 
-func buildContainerSensorVolumes(socketPath string) ([]corev1.VolumeMount, []corev1.Volume) {
-	directory := corev1.HostPathDirectory
+func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime, privilegeMode qualysv1.PrivilegeMode) ([]corev1.VolumeMount, []corev1.Volume) {
 	directoryOrCreate := corev1.HostPathDirectoryOrCreate
+	directory := corev1.HostPathDirectory
 	socket := corev1.HostPathSocket
+	fileType := corev1.HostPathFile
 
-	volumeMounts := []corev1.VolumeMount{
-		{Name: "var-run", MountPath: "/var/run"},
-		{Name: "runtime-socket", MountPath: socketPath},
-		{Name: "host-root", MountPath: "/host", ReadOnly: true},
-		{Name: "qualys-sensor-data", MountPath: "/usr/local/qualys/qpa/data"},
+	switch privilegeMode {
+	case qualysv1.PrivilegeModeUnprivileged:
+		volumeMounts := []corev1.VolumeMount{
+			{Name: "runtime-socket", MountPath: socketPath, ReadOnly: true},
+			{Name: "sensor-data", MountPath: "/usr/local/qualys/qpa/data"},
+			{Name: "tmp", MountPath: "/tmp"},
+		}
+		volumes := []corev1.Volume{
+			{Name: "runtime-socket", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
+			{Name: "sensor-data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+			{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		}
+		return volumeMounts, volumes
+
+	case qualysv1.PrivilegeModeMinimal:
+		volumeMounts := []corev1.VolumeMount{
+			{Name: "runtime-socket", MountPath: socketPath},
+			{Name: "host-root", MountPath: "/host", ReadOnly: true},
+			{Name: "sensor-data", MountPath: "/usr/local/qualys/qpa/data"},
+			{Name: "tmp", MountPath: "/tmp"},
+		}
+		volumes := []corev1.Volume{
+			{Name: "runtime-socket", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
+			{Name: "host-root", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/", Type: &directory}}},
+			{Name: "sensor-data", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}},
+			{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		}
+		return volumeMounts, volumes
+
+	case qualysv1.PrivilegeModePrivileged:
+		volumeMounts := []corev1.VolumeMount{
+			{Name: "socket-volume", MountPath: socketPath, ReadOnly: true},
+			{Name: "persistent-volume", MountPath: "/usr/local/qualys/qpa/data"},
+			{Name: "agent-volume", MountPath: "/usr/local/qualys/qpa/data/conf/agent-data"},
+		}
+		volumes := []corev1.Volume{
+			{Name: "socket-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
+			{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}},
+			{Name: "agent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/qualys", Type: &directoryOrCreate}}},
+		}
+		if rt == platform.RuntimeCRIO {
+			volumeMounts = append(volumeMounts,
+				corev1.VolumeMount{Name: "container-storage", MountPath: "/var/lib/containers/storage", ReadOnly: true},
+				corev1.VolumeMount{Name: "storage-config-volume", MountPath: "/etc/containers/storage.conf", ReadOnly: true},
+			)
+			volumes = append(volumes,
+				corev1.Volume{Name: "container-storage", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/lib/containers/storage"}}},
+				corev1.Volume{Name: "storage-config-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/containers/storage.conf", Type: &fileType}}},
+			)
+		}
+		return volumeMounts, volumes
+
+	default:
+		volumeMounts := []corev1.VolumeMount{
+			{Name: "socket-volume", MountPath: socketPath, ReadOnly: true},
+			{Name: "persistent-volume", MountPath: "/usr/local/qualys/qpa/data"},
+			{Name: "agent-volume", MountPath: "/usr/local/qualys/qpa/data/conf/agent-data"},
+		}
+		volumes := []corev1.Volume{
+			{Name: "socket-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
+			{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}},
+			{Name: "agent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/qualys", Type: &directoryOrCreate}}},
+		}
+		if rt == platform.RuntimeCRIO {
+			volumeMounts = append(volumeMounts,
+				corev1.VolumeMount{Name: "container-storage", MountPath: "/var/lib/containers/storage", ReadOnly: true},
+				corev1.VolumeMount{Name: "storage-config-volume", MountPath: "/etc/containers/storage.conf", ReadOnly: true},
+			)
+			volumes = append(volumes,
+				corev1.Volume{Name: "container-storage", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/lib/containers/storage"}}},
+				corev1.Volume{Name: "storage-config-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/containers/storage.conf", Type: &fileType}}},
+			)
+		}
+		return volumeMounts, volumes
 	}
-
-	volumes := []corev1.Volume{
-		{Name: "var-run", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/run", Type: &directory}}},
-		{Name: "runtime-socket", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
-		{Name: "host-root", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/", Type: &directory}}},
-		{Name: "qualys-sensor-data", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}},
-	}
-
-	return volumeMounts, volumes
 }
 
 func getRuntimeName(rt platform.ContainerRuntime) string {
@@ -1202,7 +1653,7 @@ func getRuntimeName(rt platform.ContainerRuntime) string {
 	}
 }
 
-func getSocketPath(runtimeConfig qualysv1alpha1.ContainerRuntimeConfig, rt platform.ContainerRuntime) string {
+func getSocketPath(runtimeConfig qualysv1.ContainerRuntimeConfig, rt platform.ContainerRuntime) string {
 	if runtimeConfig.SocketPaths == nil {
 		switch rt {
 		case platform.RuntimeCRIO:
@@ -1237,7 +1688,7 @@ func boolPtr(b bool) *bool    { return &b }
 func int64Ptr(i int64) *int64 { return &i }
 func strPtr(s string) *string { return &s }
 
-func isComponentReady(status *qualysv1alpha1.ComponentStatus) bool {
+func isComponentReady(status *qualysv1.ComponentStatus) bool {
 	if status == nil || !status.Enabled {
 		return true
 	}

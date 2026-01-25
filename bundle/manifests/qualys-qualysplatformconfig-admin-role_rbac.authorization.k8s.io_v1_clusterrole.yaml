@@ -8,13 +8,13 @@ metadata:
   name: qualys-qualysplatformconfig-admin-role
 rules:
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualysplatformconfigs
   verbs:
   - '*'
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualysplatformconfigs/status
   verbs:

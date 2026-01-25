@@ -8,7 +8,7 @@ metadata:
   name: qualys-qualysplatformconfig-editor-role
 rules:
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualysplatformconfigs
   verbs:
@@ -20,7 +20,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualysplatformconfigs/status
   verbs:

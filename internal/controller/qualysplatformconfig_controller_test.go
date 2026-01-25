@@ -28,7 +28,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	qualysv1alpha1 "github.com/nelssec/qualys-nanny/api/v1alpha1"
+	qualysv1 "github.com/nelssec/qualys-nanny/api/v1"
 )
 
 var _ = Describe("QualysPlatformConfig Controller", func() {
@@ -64,24 +64,24 @@ var _ = Describe("QualysPlatformConfig Controller", func() {
 			}
 
 			By("creating the custom resource for the Kind QualysPlatformConfig")
-			resource := &qualysv1alpha1.QualysPlatformConfig{
+			resource := &qualysv1.QualysPlatformConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: resourceName,
 				},
-				Spec: qualysv1alpha1.QualysPlatformConfigSpec{
-					Platform: qualysv1alpha1.PlatformSettings{
-						ServerUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/",
+				Spec: qualysv1.QualysPlatformConfigSpec{
+					Platform: qualysv1.PlatformSettings{
+						ServerUri: "https://cmsqagpublic.qg2.apps.qualys.com/ContainerSensor",
 					},
-					Credentials: qualysv1alpha1.CredentialsConfig{
-						SourceType: qualysv1alpha1.CredentialSourceSecret,
-						SecretRef: &qualysv1alpha1.SecretReference{
+					Credentials: qualysv1.CredentialsConfig{
+						SourceType: qualysv1.CredentialSourceSecret,
+						SecretRef: &qualysv1.SecretReference{
 							Name:      secretName,
 							Namespace: namespace,
 						},
 					},
 				},
 			}
-			err = k8sClient.Get(ctx, typeNamespacedName, &qualysv1alpha1.QualysPlatformConfig{})
+			err = k8sClient.Get(ctx, typeNamespacedName, &qualysv1.QualysPlatformConfig{})
 			if errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -89,7 +89,7 @@ var _ = Describe("QualysPlatformConfig Controller", func() {
 
 		AfterEach(func() {
 			By("Cleanup the specific resource instance QualysPlatformConfig")
-			resource := &qualysv1alpha1.QualysPlatformConfig{}
+			resource := &qualysv1.QualysPlatformConfig{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			if err == nil {
 				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
@@ -118,28 +118,28 @@ var _ = Describe("QualysPlatformConfig Controller", func() {
 			Expect(result.RequeueAfter).To(Equal(RequeueIntervalDefault))
 
 			By("Checking the status condition")
-			updatedResource := &qualysv1alpha1.QualysPlatformConfig{}
+			updatedResource := &qualysv1.QualysPlatformConfig{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, updatedResource)).To(Succeed())
 			Expect(updatedResource.Status.Conditions).NotTo(BeEmpty())
 
-			credCond := qualysv1alpha1.GetCondition(updatedResource.Status.Conditions, qualysv1alpha1.ConditionTypeCredentialsReady)
+			credCond := qualysv1.GetCondition(updatedResource.Status.Conditions, qualysv1.ConditionTypeCredentialsReady)
 			Expect(credCond).NotTo(BeNil())
 			Expect(credCond.Status).To(Equal(metav1.ConditionTrue))
 		})
 
 		It("should fail when credentials secret is missing", func() {
 			By("Creating a platform config with non-existent secret")
-			badResource := &qualysv1alpha1.QualysPlatformConfig{
+			badResource := &qualysv1.QualysPlatformConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "bad-platform-config",
 				},
-				Spec: qualysv1alpha1.QualysPlatformConfigSpec{
-					Platform: qualysv1alpha1.PlatformSettings{
-						ServerUri: "https://qagpublic.qg2.apps.qualys.com/CloudAgent/",
+				Spec: qualysv1.QualysPlatformConfigSpec{
+					Platform: qualysv1.PlatformSettings{
+						ServerUri: "https://cmsqagpublic.qg2.apps.qualys.com/ContainerSensor",
 					},
-					Credentials: qualysv1alpha1.CredentialsConfig{
-						SourceType: qualysv1alpha1.CredentialSourceSecret,
-						SecretRef: &qualysv1alpha1.SecretReference{
+					Credentials: qualysv1.CredentialsConfig{
+						SourceType: qualysv1.CredentialSourceSecret,
+						SecretRef: &qualysv1.SecretReference{
 							Name:      "nonexistent-secret",
 							Namespace: namespace,
 						},

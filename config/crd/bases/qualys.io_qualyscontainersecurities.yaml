@@ -4,33 +4,33 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: qualyscloudagents.qualys.qualys.io
+  name: qualyscontainersecurities.qualys.io
 spec:
-  group: qualys.qualys.io
+  group: qualys.io
   names:
-    kind: QualysCloudAgent
-    listKind: QualysCloudAgentList
-    plural: qualyscloudagents
-    singular: qualyscloudagent
+    kind: QualysContainerSecurity
+    listKind: QualysContainerSecurityList
+    plural: qualyscontainersecurities
+    singular: qualyscontainersecurity
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.desiredNumberScheduled
-      name: Desired
-      type: integer
-    - jsonPath: .status.numberReady
-      name: Ready
-      type: integer
-    - jsonPath: .status.numberAvailable
-      name: Available
-      type: integer
-    - jsonPath: .status.conditions[?(@.type=="Available")].status
-      name: Status
+    - jsonPath: .status.containerSensor.ready
+      name: Container
+      type: string
+    - jsonPath: .status.clusterSensor.ready
+      name: Cluster
+      type: string
+    - jsonPath: .status.admissionController.ready
+      name: Admission
+      type: string
+    - jsonPath: .status.runtimeSensor.ready
+      name: Runtime
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v1alpha1
+    name: v1
     schema:
       openAPIV3Schema:
         properties:
@@ -53,127 +53,670 @@ spec:
             type: object
           spec:
             properties:
-              config:
+              admissionController:
                 properties:
-                  cmdMaxTimeOut:
-                    default: 1800
+                  enabled:
+                    default: false
+                    type: boolean
+                  extraArgs:
+                    items:
+                      type: string
+                    type: array
+                  failurePolicy:
+                    default: Ignore
+                    enum:
+                    - Fail
+                    - Ignore
+                    type: string
+                  image:
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: PullPolicy describes a policy for if/when to
+                          pull a container image
+                        enum:
+                        - Always
+                        - Never
+                        - IfNotPresent
+                        type: string
+                      pullSecrets:
+                        items:
+                          description: |-
+                            LocalObjectReference contains enough information to let you locate the
+                            referenced object inside the same namespace.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        type: array
+                      repository:
+                        type: string
+                      tag:
+                        type: string
+                    required:
+                    - repository
+                    type: object
+                  logging:
+                    properties:
+                      enableConsoleLogs:
+                        type: boolean
+                      logFilePurgeCount:
+                        default: 5
+                        minimum: 1
+                        type: integer
+                      logFileSize:
+                        default: 10M
+                        type: string
+                      logLevel:
+                        default: 3
+                        maximum: 5
+                        minimum: 0
+                        type: integer
+                    type: object
+                  namespaceSelector:
+                    description: |-
+                      A label selector is a label query over a set of resources. The result of matchLabels and
+                      matchExpressions are ANDed. An empty label selector matches all objects. A null
+                      label selector matches no objects.
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  replicas:
+                    default: 2
+                    format: int32
                     minimum: 1
                     type: integer
-                  group:
-                    type: string
-                  hostIdSearchDir:
-                    maxLength: 256
-                    pattern: ^(/[a-zA-Z0-9/_.-]+)?$
-                    type: string
-                  logCompression:
-                    type: boolean
-                  logDestType:
-                    enum:
-                    - file
-                    - syslog
-                    type: string
-                  logFileDir:
-                    maxLength: 256
-                    pattern: ^(/[a-zA-Z0-9/_.-]+)?$
-                    type: string
-                  logLevel:
-                    default: 3
-                    maximum: 5
-                    minimum: 0
-                    type: integer
-                  maxRandomScanIntervalPC:
-                    maximum: 43200
-                    minimum: 0
-                    type: integer
-                  maxRandomScanIntervalVM:
-                    maximum: 43200
-                    minimum: 0
-                    type: integer
-                  processPriority:
-                    default: 0
-                    maximum: 19
-                    minimum: -20
-                    type: integer
-                  scanDelayPC:
-                    maximum: 43200
-                    minimum: 0
-                    type: integer
-                  scanDelayVM:
-                    maximum: 43200
-                    minimum: 0
-                    type: integer
-                  sudoCommand:
-                    maxLength: 128
-                    pattern: ^[a-zA-Z0-9/_.-]*$
-                    type: string
-                  useAuditDispatcher:
-                    type: boolean
-                  useSudo:
-                    type: boolean
-                  user:
-                    type: string
-                type: object
-              coreosConfig:
-                properties:
-                  cpuLimit:
-                    default: 200m
-                    pattern: ^[0-9]+m?$
-                    type: string
-                  providerName:
-                    default: AUTO
-                    enum:
-                    - AWS
-                    - AZURE
-                    - GCP
-                    - IBM
-                    - ALIBABA
-                    - ORACLE
-                    - NONE
-                    - AUTO
-                    type: string
-                type: object
-              deploymentMode:
-                default: auto
-                enum:
-                - auto
-                - bootstrapper
-                - coreos
-                type: string
-              image:
-                properties:
-                  pullPolicy:
-                    default: IfNotPresent
-                    description: PullPolicy describes a policy for if/when to pull
-                      a container image
-                    enum:
-                    - Always
-                    - Never
-                    - IfNotPresent
-                    type: string
-                  pullSecrets:
-                    items:
-                      description: |-
-                        LocalObjectReference contains enough information to let you locate the
-                        referenced object inside the same namespace.
-                      properties:
-                        name:
-                          default: ""
-                          description: |-
-                            Name of the referent.
-                            This field is effectively required, but due to backwards compatibility is
-                            allowed to be empty. Instances of this type with an empty value here are
-                            almost certainly wrong.
-                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                          type: string
-                      type: object
-                      x-kubernetes-map-type: atomic
-                    type: array
-                  repository:
-                    type: string
-                  tag:
-                    type: string
+                  resources:
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
                 required:
-                - repository
+                - enabled
+                type: object
+              clusterSensor:
+                properties:
+                  cloudProvider:
+                    allOf:
+                    - enum:
+                      - AWS
+                      - AZURE
+                      - GCP
+                      - OCI
+                      - SELF_MANAGED_K8S
+                    - enum:
+                      - AWS
+                      - AZURE
+                      - GCP
+                      - OCI
+                      - SELF_MANAGED_K8S
+                    default: SELF_MANAGED_K8S
+                    type: string
+                  clusterID:
+                    type: string
+                  clusterName:
+                    type: string
+                  clusterRegion:
+                    type: string
+                  enabled:
+                    default: true
+                    type: boolean
+                  extraArgs:
+                    items:
+                      type: string
+                    type: array
+                  hostScanner:
+                    properties:
+                      enabled:
+                        default: true
+                        type: boolean
+                      resources:
+                        description: ResourceRequirements describes the compute resource
+                          requirements.
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This is an alpha field and requires enabling the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                      runOnMaster:
+                        default: true
+                        type: boolean
+                    type: object
+                  image:
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: PullPolicy describes a policy for if/when to
+                          pull a container image
+                        enum:
+                        - Always
+                        - Never
+                        - IfNotPresent
+                        type: string
+                      pullSecrets:
+                        items:
+                          description: |-
+                            LocalObjectReference contains enough information to let you locate the
+                            referenced object inside the same namespace.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        type: array
+                      repository:
+                        type: string
+                      tag:
+                        type: string
+                    required:
+                    - repository
+                    type: object
+                  k8sCompliance:
+                    default: true
+                    type: boolean
+                  logging:
+                    properties:
+                      enableConsoleLogs:
+                        type: boolean
+                      logFilePurgeCount:
+                        default: 5
+                        minimum: 1
+                        type: integer
+                      logFileSize:
+                        default: 10M
+                        type: string
+                      logLevel:
+                        default: 3
+                        maximum: 5
+                        minimum: 0
+                        type: integer
+                    type: object
+                  replicas:
+                    default: 1
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                required:
+                - enabled
+                type: object
+              containerRuntime:
+                properties:
+                  socketPaths:
+                    properties:
+                      containerd:
+                        default: /var/run/containerd/containerd.sock
+                        maxLength: 256
+                        pattern: ^/[a-zA-Z0-9/_.-]+\.sock$
+                        type: string
+                      crio:
+                        default: /var/run/crio/crio.sock
+                        maxLength: 256
+                        pattern: ^/[a-zA-Z0-9/_.-]+\.sock$
+                        type: string
+                      docker:
+                        default: /var/run/docker.sock
+                        maxLength: 256
+                        pattern: ^/[a-zA-Z0-9/_.-]+\.sock$
+                        type: string
+                    type: object
+                  type:
+                    default: auto
+                    enum:
+                    - cri-o
+                    - containerd
+                    - docker
+                    type: string
+                type: object
+              containerSensor:
+                properties:
+                  enabled:
+                    default: true
+                    type: boolean
+                  extraArgs:
+                    items:
+                      type: string
+                    type: array
+                  image:
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: PullPolicy describes a policy for if/when to
+                          pull a container image
+                        enum:
+                        - Always
+                        - Never
+                        - IfNotPresent
+                        type: string
+                      pullSecrets:
+                        items:
+                          description: |-
+                            LocalObjectReference contains enough information to let you locate the
+                            referenced object inside the same namespace.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        type: array
+                      repository:
+                        type: string
+                      tag:
+                        type: string
+                    required:
+                    - repository
+                    type: object
+                  k8sMode:
+                    default: true
+                    type: boolean
+                  logging:
+                    properties:
+                      enableConsoleLogs:
+                        type: boolean
+                      logFilePurgeCount:
+                        default: 5
+                        minimum: 1
+                        type: integer
+                      logFileSize:
+                        default: 10M
+                        type: string
+                      logLevel:
+                        default: 3
+                        maximum: 5
+                        minimum: 0
+                        type: integer
+                    type: object
+                  mode:
+                    allOf:
+                    - enum:
+                      - general
+                      - registry
+                      - cicd
+                    - enum:
+                      - general
+                      - registry
+                      - cicd
+                    default: general
+                    type: string
+                  privilegeMode:
+                    allOf:
+                    - enum:
+                      - unprivileged
+                      - minimal
+                      - standard
+                      - privileged
+                    - enum:
+                      - unprivileged
+                      - minimal
+                      - standard
+                      - privileged
+                    default: standard
+                    type: string
+                  resources:
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  scanning:
+                    properties:
+                      containerLaunchTimeout:
+                        default: 10m
+                        type: string
+                      enableContainerScan:
+                        default: true
+                        type: boolean
+                      enableImageScan:
+                        default: true
+                        type: boolean
+                      enableMalwareDetection:
+                        type: boolean
+                      enableScaScan:
+                        default: true
+                        type: boolean
+                      enableSecretDetection:
+                        type: boolean
+                      scanThreadPoolSize:
+                        default: 2
+                        maximum: 10
+                        minimum: 1
+                        type: integer
+                    type: object
+                  security:
+                    properties:
+                      hostNetwork:
+                        type: boolean
+                      hostPID:
+                        type: boolean
+                      readOnlyRootFilesystem:
+                        type: boolean
+                      runAsGroup:
+                        format: int64
+                        type: integer
+                      runAsUser:
+                        format: int64
+                        type: integer
+                      runtimeSocketGroup:
+                        format: int64
+                        type: integer
+                      seccompProfile:
+                        enum:
+                        - RuntimeDefault
+                        - Unconfined
+                        - Localhost
+                        type: string
+                    type: object
+                  storage:
+                    properties:
+                      storageClass:
+                        type: string
+                      storageSize:
+                        default: 10Gi
+                        type: string
+                      usePersistentStorage:
+                        default: true
+                        type: boolean
+                    type: object
+                  updateStrategy:
+                    properties:
+                      rollingUpdate:
+                        properties:
+                          maxUnavailable:
+                            default: 25%
+                            type: string
+                        type: object
+                      type:
+                        default: RollingUpdate
+                        enum:
+                        - RollingUpdate
+                        - OnDelete
+                        type: string
+                    type: object
+                required:
+                - enabled
                 type: object
               openshift:
                 properties:
@@ -195,64 +738,145 @@ spec:
                 required:
                 - name
                 type: object
-              resources:
-                description: ResourceRequirements describes the compute resource requirements.
+              runtimeSensor:
                 properties:
-                  claims:
-                    description: |-
-                      Claims lists the names of resources, defined in spec.resourceClaims,
-                      that are used by this container.
-
-                      This is an alpha field and requires enabling the
-                      DynamicResourceAllocation feature gate.
-
-                      This field is immutable. It can only be set for containers.
+                  enabled:
+                    default: false
+                    type: boolean
+                  extraArgs:
                     items:
-                      description: ResourceClaim references one entry in PodSpec.ResourceClaims.
-                      properties:
-                        name:
-                          description: |-
-                            Name must match the name of one entry in pod.spec.resourceClaims of
-                            the Pod where this field is used. It makes that resource available
-                            inside a container.
-                          type: string
-                        request:
-                          description: |-
-                            Request is the name chosen for a request in the referenced claim.
-                            If empty, everything from the claim is made available, otherwise
-                            only the result of this request.
-                          type: string
-                      required:
-                      - name
-                      type: object
+                      type: string
                     type: array
-                    x-kubernetes-list-map-keys:
-                    - name
-                    x-kubernetes-list-type: map
-                  limits:
-                    additionalProperties:
-                      anyOf:
-                      - type: integer
-                      - type: string
-                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                      x-kubernetes-int-or-string: true
-                    description: |-
-                      Limits describes the maximum amount of compute resources allowed.
-                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                  image:
+                    properties:
+                      pullPolicy:
+                        default: IfNotPresent
+                        description: PullPolicy describes a policy for if/when to
+                          pull a container image
+                        enum:
+                        - Always
+                        - Never
+                        - IfNotPresent
+                        type: string
+                      pullSecrets:
+                        items:
+                          description: |-
+                            LocalObjectReference contains enough information to let you locate the
+                            referenced object inside the same namespace.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        type: array
+                      repository:
+                        type: string
+                      tag:
+                        type: string
+                    required:
+                    - repository
                     type: object
-                  requests:
-                    additionalProperties:
-                      anyOf:
-                      - type: integer
-                      - type: string
-                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                      x-kubernetes-int-or-string: true
-                    description: |-
-                      Requests describes the minimum amount of compute resources required.
-                      If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
-                      otherwise to an implementation-defined value. Requests cannot exceed Limits.
-                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                  logging:
+                    properties:
+                      enableConsoleLogs:
+                        type: boolean
+                      logFilePurgeCount:
+                        default: 5
+                        minimum: 1
+                        type: integer
+                      logFileSize:
+                        default: 10M
+                        type: string
+                      logLevel:
+                        default: 3
+                        maximum: 5
+                        minimum: 0
+                        type: integer
                     type: object
+                  resources:
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This is an alpha field and requires enabling the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  updateStrategy:
+                    properties:
+                      rollingUpdate:
+                        properties:
+                          maxUnavailable:
+                            default: 25%
+                            type: string
+                        type: object
+                      type:
+                        default: RollingUpdate
+                        enum:
+                        - RollingUpdate
+                        - OnDelete
+                        type: string
+                    type: object
+                required:
+                - enabled
                 type: object
               scheduling:
                 properties:
@@ -1221,26 +1845,51 @@ spec:
                       type: object
                     type: array
                 type: object
-              updateStrategy:
-                properties:
-                  rollingUpdate:
-                    properties:
-                      maxUnavailable:
-                        default: 25%
-                        type: string
-                    type: object
-                  type:
-                    default: RollingUpdate
-                    enum:
-                    - RollingUpdate
-                    - OnDelete
-                    type: string
-                type: object
             required:
             - platformConfigRef
             type: object
           status:
             properties:
+              admissionController:
+                properties:
+                  desiredReplicas:
+                    format: int32
+                    type: integer
+                  enabled:
+                    type: boolean
+                  message:
+                    type: string
+                  ready:
+                    type: boolean
+                  readyReplicas:
+                    format: int32
+                    type: integer
+                  resourceName:
+                    type: string
+                required:
+                - enabled
+                - ready
+                type: object
+              clusterSensor:
+                properties:
+                  desiredReplicas:
+                    format: int32
+                    type: integer
+                  enabled:
+                    type: boolean
+                  message:
+                    type: string
+                  ready:
+                    type: boolean
+                  readyReplicas:
+                    format: int32
+                    type: integer
+                  resourceName:
+                    type: string
+                required:
+                - enabled
+                - ready
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -1297,33 +1946,51 @@ spec:
                   - type
                   type: object
                 type: array
-              currentNumberScheduled:
-                format: int32
-                type: integer
-              daemonSetName:
+              containerSensor:
+                properties:
+                  desiredReplicas:
+                    format: int32
+                    type: integer
+                  enabled:
+                    type: boolean
+                  message:
+                    type: string
+                  ready:
+                    type: boolean
+                  readyReplicas:
+                    format: int32
+                    type: integer
+                  resourceName:
+                    type: string
+                required:
+                - enabled
+                - ready
+                type: object
+              detectedRuntime:
                 type: string
-              deploymentMode:
-                type: string
-              desiredNumberScheduled:
-                format: int32
-                type: integer
-              detectedOS:
-                type: string
-              numberAvailable:
-                format: int32
-                type: integer
-              numberMisscheduled:
-                format: int32
-                type: integer
-              numberReady:
-                format: int32
-                type: integer
               observedGeneration:
                 format: int64
                 type: integer
-              updatedNumberScheduled:
-                format: int32
-                type: integer
+              runtimeSensor:
+                properties:
+                  desiredReplicas:
+                    format: int32
+                    type: integer
+                  enabled:
+                    type: boolean
+                  message:
+                    type: string
+                  ready:
+                    type: boolean
+                  readyReplicas:
+                    format: int32
+                    type: integer
+                  resourceName:
+                    type: string
+                required:
+                - enabled
+                - ready
+                type: object
             type: object
         type: object
     served: true

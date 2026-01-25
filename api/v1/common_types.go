@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1
 
 import (
 	corev1 "k8s.io/api/core/v1"
@@ -139,7 +139,6 @@ func SetCondition(conditions *[]metav1.Condition, condition metav1.Condition) {
 	*conditions = append(*conditions, condition)
 }
 
-// GetCondition returns a condition by type
 func GetCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
 	for i := range conditions {
 		if conditions[i].Type == conditionType {

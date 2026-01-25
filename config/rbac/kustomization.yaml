@@ -25,9 +25,6 @@ resources:
 - qualyscontainersecurity_admin_role.yaml
 - qualyscontainersecurity_editor_role.yaml
 - qualyscontainersecurity_viewer_role.yaml
-- qualyscloudagent_admin_role.yaml
-- qualyscloudagent_editor_role.yaml
-- qualyscloudagent_viewer_role.yaml
 - qualysplatformconfig_admin_role.yaml
 - qualysplatformconfig_editor_role.yaml
 - qualysplatformconfig_viewer_role.yaml

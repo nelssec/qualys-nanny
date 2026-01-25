@@ -41,3 +41,6 @@ Thumbs.db
 credentials.json
 .env
 .env.*
+
+# ROSA test overlay (contains real credentials)
+config/overlays/rosa-test/

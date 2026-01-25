@@ -1,0 +1,46 @@
+apiVersion: qualys.io/v1
+kind: QualysContainerSecurity
+metadata:
+  name: qualys-recommended
+  namespace: qualys
+spec:
+  platformConfigRef:
+    name: qualys-platform
+  containerSensor:
+    enabled: true
+    image:
+      repository: qualys/qcs-sensor
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    mode: general
+    k8sMode: true
+    privilegeMode: standard
+    scanning:
+      enableImageScan: true
+      enableContainerScan: true
+      enableScaScan: true
+    storage:
+      usePersistentStorage: true
+  clusterSensor:
+    enabled: true
+    image:
+      repository: qualys/cluster-sensor
+      tag: "1.4.0-0"
+    cloudProvider: SELF_MANAGED_K8S
+    clusterName: my-cluster
+    k8sCompliance: true
+    hostScanner:
+      enabled: true
+      runOnMaster: true
+  admissionController:
+    enabled: false
+  runtimeSensor:
+    enabled: false
+  scheduling:
+    nodeSelector:
+      kubernetes.io/os: linux
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: NoExecute

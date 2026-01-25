@@ -19,6 +19,8 @@ package resources
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	qualysv1 "github.com/nelssec/qualys-nanny/api/v1"
 )
 
 var SCCGVK = schema.GroupVersionKind{
@@ -27,26 +29,26 @@ var SCCGVK = schema.GroupVersionKind{
 	Kind:    "SecurityContextConstraints",
 }
 
-func BuildCloudAgentSCC(name, namespace, serviceAccountName string) *unstructured.Unstructured {
+func BuildContainerSensorSCC(name, namespace, serviceAccountName string) *unstructured.Unstructured {
+	return BuildContainerSensorSCCWithPrivilegeMode(name, namespace, serviceAccountName, qualysv1.PrivilegeModeStandard)
+}
+
+func BuildRuntimeSensorSCC(name, namespace, serviceAccountName string) *unstructured.Unstructured {
 	scc := &unstructured.Unstructured{}
 	scc.SetGroupVersionKind(SCCGVK)
 	scc.SetName(name)
 	scc.SetAnnotations(map[string]string{
-		"kubernetes.io/description": "SCC for Qualys Cloud Agent - requires host access for system scanning",
+		"kubernetes.io/description": "SCC for Qualys Runtime Sensor (eBPF) - requires privileged mode for kernel tracing",
 	})
 
 	scc.Object["allowHostDirVolumePlugin"] = true
 	scc.Object["allowHostIPC"] = false
-	scc.Object["allowHostNetwork"] = false
+	scc.Object["allowHostNetwork"] = true
 	scc.Object["allowHostPID"] = true
 	scc.Object["allowHostPorts"] = false
 	scc.Object["allowPrivilegeEscalation"] = true
 	scc.Object["allowPrivilegedContainer"] = true
-	scc.Object["allowedCapabilities"] = []interface{}{
-		"SYS_PTRACE",
-		"SYS_ADMIN",
-		"SYS_CHROOT",
-	}
+	scc.Object["allowedCapabilities"] = []interface{}{"*"}
 	scc.Object["defaultAddCapabilities"] = []interface{}{}
 	scc.Object["fsGroup"] = map[string]interface{}{
 		"type": "RunAsAny",
@@ -80,53 +82,164 @@ func BuildCloudAgentSCC(name, namespace, serviceAccountName string) *unstructure
 	return scc
 }
 
-func BuildContainerSensorSCC(name, namespace, serviceAccountName string) *unstructured.Unstructured {
+func BuildClusterSensorSCC(name, namespace, serviceAccountName string) *unstructured.Unstructured {
 	scc := &unstructured.Unstructured{}
 	scc.SetGroupVersionKind(SCCGVK)
 	scc.SetName(name)
-	scc.SetAnnotations(map[string]string{
-		"kubernetes.io/description": "SCC for Qualys Container Security Sensor - requires privileged access for container scanning",
-	})
 
 	scc.Object["allowHostDirVolumePlugin"] = true
 	scc.Object["allowHostIPC"] = false
 	scc.Object["allowHostNetwork"] = true
-	scc.Object["allowHostPID"] = true
+	scc.Object["allowHostPID"] = false
 	scc.Object["allowHostPorts"] = false
-	scc.Object["allowPrivilegeEscalation"] = true
-	scc.Object["allowPrivilegedContainer"] = true
-	scc.Object["allowedCapabilities"] = []interface{}{
-		"SYS_PTRACE",
-		"SYS_ADMIN",
-	}
-	scc.Object["defaultAddCapabilities"] = []interface{}{}
-	scc.Object["fsGroup"] = map[string]interface{}{
-		"type": "RunAsAny",
-	}
-	scc.Object["groups"] = []interface{}{}
-	scc.Object["priority"] = nil
+	scc.Object["allowPrivilegedContainer"] = false
 	scc.Object["readOnlyRootFilesystem"] = false
-	scc.Object["requiredDropCapabilities"] = []interface{}{}
 	scc.Object["runAsUser"] = map[string]interface{}{
 		"type": "RunAsAny",
 	}
 	scc.Object["seLinuxContext"] = map[string]interface{}{
 		"type": "RunAsAny",
 	}
-	scc.Object["supplementalGroups"] = map[string]interface{}{
-		"type": "RunAsAny",
-	}
 	scc.Object["users"] = []interface{}{
 		"system:serviceaccount:" + namespace + ":" + serviceAccountName,
 	}
-	scc.Object["volumes"] = []interface{}{
-		"configMap",
-		"downwardAPI",
-		"emptyDir",
-		"hostPath",
-		"persistentVolumeClaim",
-		"projected",
-		"secret",
+
+	return scc
+}
+
+func BuildContainerSensorSCCWithPrivilegeMode(name, namespace, serviceAccountName string, privilegeMode qualysv1.PrivilegeMode) *unstructured.Unstructured {
+	scc := &unstructured.Unstructured{}
+	scc.SetGroupVersionKind(SCCGVK)
+	scc.SetName(name)
+
+	switch privilegeMode {
+	case qualysv1.PrivilegeModeUnprivileged:
+		scc.SetAnnotations(map[string]string{
+			"kubernetes.io/description": "SCC for Qualys Container Sensor (unprivileged) - image scanning only via CRI API",
+		})
+		scc.Object["allowHostDirVolumePlugin"] = true
+		scc.Object["allowHostIPC"] = false
+		scc.Object["allowHostNetwork"] = false
+		scc.Object["allowHostPID"] = false
+		scc.Object["allowHostPorts"] = false
+		scc.Object["allowPrivilegeEscalation"] = false
+		scc.Object["allowPrivilegedContainer"] = false
+		scc.Object["allowedCapabilities"] = []interface{}{}
+		scc.Object["defaultAddCapabilities"] = []interface{}{}
+		scc.Object["fsGroup"] = map[string]interface{}{
+			"type": "MustRunAs",
+			"ranges": []interface{}{
+				map[string]interface{}{"min": int64(1), "max": int64(65535)},
+			},
+		}
+		scc.Object["groups"] = []interface{}{}
+		scc.Object["priority"] = nil
+		scc.Object["readOnlyRootFilesystem"] = true
+		scc.Object["requiredDropCapabilities"] = []interface{}{"ALL"}
+		scc.Object["runAsUser"] = map[string]interface{}{
+			"type": "MustRunAsNonRoot",
+		}
+		scc.Object["seLinuxContext"] = map[string]interface{}{
+			"type": "MustRunAs",
+		}
+		scc.Object["supplementalGroups"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["volumes"] = []interface{}{
+			"configMap",
+			"downwardAPI",
+			"emptyDir",
+			"hostPath",
+			"projected",
+			"secret",
+		}
+
+	case qualysv1.PrivilegeModeMinimal:
+		scc.SetAnnotations(map[string]string{
+			"kubernetes.io/description": "SCC for Qualys Container Sensor (minimal) - image and container scanning with SYS_PTRACE",
+		})
+		scc.Object["allowHostDirVolumePlugin"] = true
+		scc.Object["allowHostIPC"] = false
+		scc.Object["allowHostNetwork"] = true
+		scc.Object["allowHostPID"] = true
+		scc.Object["allowHostPorts"] = false
+		scc.Object["allowPrivilegeEscalation"] = false
+		scc.Object["allowPrivilegedContainer"] = false
+		scc.Object["allowedCapabilities"] = []interface{}{"SYS_PTRACE"}
+		scc.Object["defaultAddCapabilities"] = []interface{}{}
+		scc.Object["fsGroup"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["groups"] = []interface{}{}
+		scc.Object["priority"] = nil
+		scc.Object["readOnlyRootFilesystem"] = false
+		scc.Object["requiredDropCapabilities"] = []interface{}{"ALL"}
+		scc.Object["runAsUser"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["seLinuxContext"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["supplementalGroups"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["volumes"] = []interface{}{
+			"configMap",
+			"downwardAPI",
+			"emptyDir",
+			"hostPath",
+			"persistentVolumeClaim",
+			"projected",
+			"secret",
+		}
+
+	default:
+		scc.SetAnnotations(map[string]string{
+			"kubernetes.io/description": "SCC for Qualys Container Sensor (standard) - full scanning with SYS_ADMIN, SYS_PTRACE, SYS_CHROOT",
+		})
+		scc.Object["allowHostDirVolumePlugin"] = true
+		scc.Object["allowHostIPC"] = false
+		scc.Object["allowHostNetwork"] = true
+		scc.Object["allowHostPID"] = true
+		scc.Object["allowHostPorts"] = false
+		scc.Object["allowPrivilegeEscalation"] = true
+		scc.Object["allowPrivilegedContainer"] = false
+		scc.Object["allowedCapabilities"] = []interface{}{
+			"SYS_ADMIN",
+			"SYS_PTRACE",
+			"SYS_CHROOT",
+			"DAC_READ_SEARCH",
+		}
+		scc.Object["defaultAddCapabilities"] = []interface{}{}
+		scc.Object["fsGroup"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["groups"] = []interface{}{}
+		scc.Object["priority"] = nil
+		scc.Object["readOnlyRootFilesystem"] = false
+		scc.Object["requiredDropCapabilities"] = []interface{}{}
+		scc.Object["runAsUser"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["seLinuxContext"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["supplementalGroups"] = map[string]interface{}{
+			"type": "RunAsAny",
+		}
+		scc.Object["volumes"] = []interface{}{
+			"configMap",
+			"downwardAPI",
+			"emptyDir",
+			"hostPath",
+			"persistentVolumeClaim",
+			"projected",
+			"secret",
+		}
+	}
+
+	scc.Object["users"] = []interface{}{
+		"system:serviceaccount:" + namespace + ":" + serviceAccountName,
 	}
 
 	return scc

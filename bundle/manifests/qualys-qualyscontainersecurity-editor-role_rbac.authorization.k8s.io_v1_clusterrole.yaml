@@ -8,7 +8,7 @@ metadata:
   name: qualys-qualyscontainersecurity-editor-role
 rules:
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualyscontainersecurities
   verbs:
@@ -20,7 +20,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualyscontainersecurities/status
   verbs:

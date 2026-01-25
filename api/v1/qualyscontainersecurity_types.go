@@ -14,25 +14,22 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1
 
 import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ContainerRuntimeType defines the container runtime type
-// +kubebuilder:validation:Enum=auto;containerd;cri-o;docker
+// +kubebuilder:validation:Enum=cri-o;containerd;docker
 type ContainerRuntimeType string
 
 const (
-	ContainerRuntimeAuto       ContainerRuntimeType = "auto"
-	ContainerRuntimeContainerd ContainerRuntimeType = "containerd"
 	ContainerRuntimeCRIO       ContainerRuntimeType = "cri-o"
+	ContainerRuntimeContainerd ContainerRuntimeType = "containerd"
 	ContainerRuntimeDocker     ContainerRuntimeType = "docker"
 )
 
-// ContainerSensorMode defines the operating mode for the container sensor
 // +kubebuilder:validation:Enum=general;registry;cicd
 type ContainerSensorMode string
 
@@ -42,332 +39,275 @@ const (
 	ContainerSensorModeCICD     ContainerSensorMode = "cicd"
 )
 
-// QualysContainerSecuritySpec defines the desired state of QualysContainerSecurity.
+// +kubebuilder:validation:Enum=unprivileged;minimal;standard;privileged
+type PrivilegeMode string
+
+const (
+	PrivilegeModeUnprivileged PrivilegeMode = "unprivileged"
+	PrivilegeModeMinimal      PrivilegeMode = "minimal"
+	PrivilegeModeStandard     PrivilegeMode = "standard"
+	PrivilegeModePrivileged   PrivilegeMode = "privileged"
+)
+
 type QualysContainerSecuritySpec struct {
-	// PlatformConfigRef references the QualysPlatformConfig to use
 	// +kubebuilder:validation:Required
 	PlatformConfigRef PlatformConfigReference `json:"platformConfigRef"`
 
-	// ContainerSensor configures the Container Security Sensor (DaemonSet)
-	// Scans container images and running containers for vulnerabilities
-	// +optional
 	ContainerSensor *ContainerSensorConfig `json:"containerSensor,omitempty"`
 
-	// ClusterSensor configures the Cluster Sensor (Deployment)
-	// Monitors K8s API for cluster events, network activity, and workload inventory
-	// +optional
 	ClusterSensor *ClusterSensorConfig `json:"clusterSensor,omitempty"`
 
-	// AdmissionController configures the Admission Controller (Deployment + Webhook)
-	// Enforces security policies on resource creation/updates
-	// +optional
 	AdmissionController *AdmissionControllerConfig `json:"admissionController,omitempty"`
 
-	// RuntimeSensor configures the Container Runtime Sensor (DaemonSet)
-	// Uses eBPF to track file and process events in containers
-	// +optional
 	RuntimeSensor *RuntimeSensorConfig `json:"runtimeSensor,omitempty"`
 
-	// ContainerRuntime specifies container runtime configuration (shared by sensors)
-	// +optional
 	ContainerRuntime *ContainerRuntimeConfig `json:"containerRuntime,omitempty"`
 
-	// Scheduling defines pod scheduling options (shared by DaemonSet components)
-	// +optional
 	Scheduling *SchedulingConfig `json:"scheduling,omitempty"`
 
-	// OpenShift defines OpenShift-specific settings
-	// +optional
 	OpenShift *OpenShiftConfig `json:"openshift,omitempty"`
 }
 
-// ContainerSensorConfig defines the Container Security Sensor configuration
 type ContainerSensorConfig struct {
-	// Enabled controls whether the Container Sensor is deployed
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
 
-	// Image defines the container image to use
-	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 
-	// Mode specifies the operating mode: general, registry, or cicd
 	// +kubebuilder:validation:Enum=general;registry;cicd
 	// +kubebuilder:default=general
 	Mode ContainerSensorMode `json:"mode,omitempty"`
 
-	// K8sMode enables Kubernetes integration
 	// +kubebuilder:default=true
 	K8sMode bool `json:"k8sMode,omitempty"`
 
-	// Scanning contains scanning configuration
-	// +optional
+	// +kubebuilder:validation:Enum=unprivileged;minimal;standard;privileged
+	// +kubebuilder:default=standard
+	PrivilegeMode PrivilegeMode `json:"privilegeMode,omitempty"`
+
+	Security *SensorSecurityConfig `json:"security,omitempty"`
+
 	Scanning *ScanningConfig `json:"scanning,omitempty"`
 
-	// Storage contains persistent storage configuration
-	// +optional
 	Storage *StorageConfig `json:"storage,omitempty"`
 
-	// Logging contains logging configuration
-	// +optional
 	Logging *SensorLoggingConfig `json:"logging,omitempty"`
 
-	// Resources defines resource requirements
-	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// UpdateStrategy defines the DaemonSet update strategy
-	// +optional
 	UpdateStrategy *UpdateStrategyConfig `json:"updateStrategy,omitempty"`
 
-	// ExtraArgs are additional arguments to pass to the sensor
-	// +optional
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 }
 
-// ClusterSensorConfig defines the Cluster Sensor configuration
+// +kubebuilder:validation:Enum=AWS;AZURE;GCP;OCI;SELF_MANAGED_K8S
+type CloudProvider string
+
+const (
+	CloudProviderAWS            CloudProvider = "AWS"
+	CloudProviderAzure          CloudProvider = "AZURE"
+	CloudProviderGCP            CloudProvider = "GCP"
+	CloudProviderOCI            CloudProvider = "OCI"
+	CloudProviderSelfManagedK8S CloudProvider = "SELF_MANAGED_K8S"
+)
+
 type ClusterSensorConfig struct {
-	// Enabled controls whether the Cluster Sensor is deployed
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
 
-	// Image defines the container image to use
-	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 
-	// Replicas is the number of Cluster Sensor replicas
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// Logging contains logging configuration
-	// +optional
+	// +kubebuilder:validation:Enum=AWS;AZURE;GCP;OCI;SELF_MANAGED_K8S
+	// +kubebuilder:default=SELF_MANAGED_K8S
+	CloudProvider CloudProvider `json:"cloudProvider,omitempty"`
+
+	ClusterName string `json:"clusterName,omitempty"`
+
+	ClusterID string `json:"clusterID,omitempty"`
+
+	ClusterRegion string `json:"clusterRegion,omitempty"`
+
+	// +kubebuilder:default=true
+	K8sCompliance bool `json:"k8sCompliance,omitempty"`
+
+	HostScanner *HostScannerConfig `json:"hostScanner,omitempty"`
+
 	Logging *SensorLoggingConfig `json:"logging,omitempty"`
 
-	// Resources defines resource requirements
-	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// ExtraArgs are additional arguments to pass to the sensor
-	// +optional
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 }
 
-// AdmissionControllerConfig defines the Admission Controller configuration
+type HostScannerConfig struct {
+	// +kubebuilder:default=true
+	Enabled bool `json:"enabled,omitempty"`
+
+	// +kubebuilder:default=true
+	RunOnMaster bool `json:"runOnMaster,omitempty"`
+
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
 type AdmissionControllerConfig struct {
-	// Enabled controls whether the Admission Controller is deployed
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled"`
 
-	// Image defines the container image to use
-	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 
-	// Replicas is the number of Admission Controller replicas
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=2
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// FailurePolicy defines webhook failure policy: Fail or Ignore
 	// +kubebuilder:validation:Enum=Fail;Ignore
 	// +kubebuilder:default=Ignore
 	FailurePolicy string `json:"failurePolicy,omitempty"`
 
-	// NamespaceSelector limits which namespaces are subject to admission control
-	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
-	// Logging contains logging configuration
-	// +optional
 	Logging *SensorLoggingConfig `json:"logging,omitempty"`
 
-	// Resources defines resource requirements
-	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// ExtraArgs are additional arguments to pass to the controller
-	// +optional
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 }
 
-// RuntimeSensorConfig defines the Container Runtime Sensor (eBPF) configuration
 type RuntimeSensorConfig struct {
-	// Enabled controls whether the Runtime Sensor is deployed
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled"`
 
-	// Image defines the container image to use
-	// +optional
 	Image *ImageSpec `json:"image,omitempty"`
 
-	// Logging contains logging configuration
-	// +optional
 	Logging *SensorLoggingConfig `json:"logging,omitempty"`
 
-	// Resources defines resource requirements
-	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// UpdateStrategy defines the DaemonSet update strategy
-	// +optional
 	UpdateStrategy *UpdateStrategyConfig `json:"updateStrategy,omitempty"`
 
-	// ExtraArgs are additional arguments to pass to the sensor
-	// +optional
 	ExtraArgs []string `json:"extraArgs,omitempty"`
 }
 
-// ContainerRuntimeConfig defines container runtime settings
 type ContainerRuntimeConfig struct {
-	// Type specifies the container runtime type
 	// +kubebuilder:default=auto
 	Type ContainerRuntimeType `json:"type,omitempty"`
 
-	// SocketPaths overrides default socket paths for each runtime
-	// +optional
 	SocketPaths *RuntimeSocketPaths `json:"socketPaths,omitempty"`
 }
 
-// RuntimeSocketPaths defines custom socket paths for container runtimes
 type RuntimeSocketPaths struct {
-	// Containerd socket path
 	// +kubebuilder:default="/var/run/containerd/containerd.sock"
 	// +kubebuilder:validation:Pattern=`^/[a-zA-Z0-9/_.-]+\.sock$`
 	// +kubebuilder:validation:MaxLength=256
 	Containerd string `json:"containerd,omitempty"`
 
-	// CRIO socket path
 	// +kubebuilder:default="/var/run/crio/crio.sock"
 	// +kubebuilder:validation:Pattern=`^/[a-zA-Z0-9/_.-]+\.sock$`
 	// +kubebuilder:validation:MaxLength=256
 	CRIO string `json:"crio,omitempty"`
 
-	// Docker socket path
 	// +kubebuilder:default="/var/run/docker.sock"
 	// +kubebuilder:validation:Pattern=`^/[a-zA-Z0-9/_.-]+\.sock$`
 	// +kubebuilder:validation:MaxLength=256
 	Docker string `json:"docker,omitempty"`
 }
 
-// ScanningConfig defines scanning options
 type ScanningConfig struct {
-	// EnableImageScan enables container image scanning
 	// +kubebuilder:default=true
 	EnableImageScan bool `json:"enableImageScan,omitempty"`
 
-	// EnableContainerScan enables running container scanning
 	// +kubebuilder:default=true
 	EnableContainerScan bool `json:"enableContainerScan,omitempty"`
 
-	// EnableMalwareDetection enables malware detection
-	// +optional
 	EnableMalwareDetection bool `json:"enableMalwareDetection,omitempty"`
 
-	// EnableSecretDetection enables secret detection in images
-	// +optional
 	EnableSecretDetection bool `json:"enableSecretDetection,omitempty"`
 
-	// ScanThreadPoolSize is the number of concurrent scan threads
+	// +kubebuilder:default=true
+	EnableScaScan bool `json:"enableScaScan,omitempty"`
+
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=10
 	// +kubebuilder:default=2
 	ScanThreadPoolSize int `json:"scanThreadPoolSize,omitempty"`
 
-	// ContainerLaunchTimeout is the timeout for container launch detection
 	// +kubebuilder:default="10m"
 	ContainerLaunchTimeout string `json:"containerLaunchTimeout,omitempty"`
 }
 
-// StorageConfig defines persistent storage settings
 type StorageConfig struct {
-	// UsePersistentStorage enables persistent storage for scan data
 	// +kubebuilder:default=true
 	UsePersistentStorage bool `json:"usePersistentStorage,omitempty"`
 
-	// StorageClass is the storage class to use (empty uses default)
-	// +optional
 	StorageClass string `json:"storageClass,omitempty"`
 
-	// StorageSize is the size of the persistent volume
 	// +kubebuilder:default="10Gi"
 	StorageSize string `json:"storageSize,omitempty"`
 }
 
-// SensorLoggingConfig defines logging settings for sensors
 type SensorLoggingConfig struct {
-	// EnableConsoleLogs enables logging to console
-	// +optional
 	EnableConsoleLogs bool `json:"enableConsoleLogs,omitempty"`
 
-	// LogLevel sets the log verbosity (0-5)
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=5
 	// +kubebuilder:default=3
 	LogLevel int `json:"logLevel,omitempty"`
 
-	// LogFileSize is the maximum log file size
 	// +kubebuilder:default="10M"
 	LogFileSize string `json:"logFileSize,omitempty"`
 
-	// LogFilePurgeCount is the number of old log files to keep
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=5
 	LogFilePurgeCount int `json:"logFilePurgeCount,omitempty"`
 }
 
-// QualysContainerSecurityStatus defines the observed state of QualysContainerSecurity.
+type SensorSecurityConfig struct {
+	RuntimeSocketGroup *int64 `json:"runtimeSocketGroup,omitempty"`
+
+	RunAsUser *int64 `json:"runAsUser,omitempty"`
+
+	RunAsGroup *int64 `json:"runAsGroup,omitempty"`
+
+	ReadOnlyRootFilesystem *bool `json:"readOnlyRootFilesystem,omitempty"`
+
+	// +kubebuilder:validation:Enum=RuntimeDefault;Unconfined;Localhost
+	SeccompProfile string `json:"seccompProfile,omitempty"`
+
+	HostNetwork *bool `json:"hostNetwork,omitempty"`
+
+	HostPID *bool `json:"hostPID,omitempty"`
+}
+
 type QualysContainerSecurityStatus struct {
-	// Conditions represent the latest available observations of the resource's state
-	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// ObservedGeneration is the most recent generation observed
-	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// DetectedRuntime is the detected container runtime
-	// +optional
 	DetectedRuntime string `json:"detectedRuntime,omitempty"`
 
-	// ContainerSensor contains status for the Container Sensor
-	// +optional
 	ContainerSensor *ComponentStatus `json:"containerSensor,omitempty"`
 
-	// ClusterSensor contains status for the Cluster Sensor
-	// +optional
 	ClusterSensor *ComponentStatus `json:"clusterSensor,omitempty"`
 
-	// AdmissionController contains status for the Admission Controller
-	// +optional
 	AdmissionController *ComponentStatus `json:"admissionController,omitempty"`
 
-	// RuntimeSensor contains status for the Runtime Sensor
-	// +optional
 	RuntimeSensor *ComponentStatus `json:"runtimeSensor,omitempty"`
 }
 
-// ComponentStatus represents the status of a deployed component
 type ComponentStatus struct {
-	// Enabled indicates if the component is enabled in spec
 	Enabled bool `json:"enabled"`
 
-	// Ready indicates if the component is ready
 	Ready bool `json:"ready"`
 
-	// ResourceName is the name of the managed resource (DaemonSet/Deployment)
-	// +optional
 	ResourceName string `json:"resourceName,omitempty"`
 
-	// DesiredReplicas is the desired number of replicas/nodes
-	// +optional
 	DesiredReplicas int32 `json:"desiredReplicas,omitempty"`
 
-	// ReadyReplicas is the number of ready replicas/nodes
-	// +optional
 	ReadyReplicas int32 `json:"readyReplicas,omitempty"`
 
-	// Message provides additional status information
-	// +optional
 	Message string `json:"message,omitempty"`
 }
 
@@ -379,9 +319,6 @@ type ComponentStatus struct {
 // +kubebuilder:printcolumn:name="Runtime",type=string,JSONPath=`.status.runtimeSensor.ready`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// QualysContainerSecurity is the Schema for the qualyscontainersecurities API.
-// It manages deployment of Qualys Container Security components including
-// Container Sensor, Cluster Sensor, Admission Controller, and Runtime Sensor.
 type QualysContainerSecurity struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -392,7 +329,6 @@ type QualysContainerSecurity struct {
 
 // +kubebuilder:object:root=true
 
-// QualysContainerSecurityList contains a list of QualysContainerSecurity.
 type QualysContainerSecurityList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
@@ -403,7 +339,6 @@ func init() {
 	SchemeBuilder.Register(&QualysContainerSecurity{}, &QualysContainerSecurityList{})
 }
 
-// GetContainerSensor returns the container sensor config with defaults applied
 func (s *QualysContainerSecuritySpec) GetContainerSensor() ContainerSensorConfig {
 	if s.ContainerSensor != nil {
 		cfg := *s.ContainerSensor
@@ -417,6 +352,9 @@ func (s *QualysContainerSecuritySpec) GetContainerSensor() ContainerSensorConfig
 		if cfg.Mode == "" {
 			cfg.Mode = ContainerSensorModeGeneral
 		}
+		if cfg.PrivilegeMode == "" {
+			cfg.PrivilegeMode = PrivilegeModeStandard
+		}
 		return cfg
 	}
 	return ContainerSensorConfig{
@@ -426,8 +364,9 @@ func (s *QualysContainerSecuritySpec) GetContainerSensor() ContainerSensorConfig
 			Tag:        "latest",
 			PullPolicy: corev1.PullIfNotPresent,
 		},
-		Mode:    ContainerSensorModeGeneral,
-		K8sMode: true,
+		Mode:          ContainerSensorModeGeneral,
+		PrivilegeMode: PrivilegeModeStandard,
+		K8sMode:       true,
 		Scanning: &ScanningConfig{
 			EnableImageScan:        true,
 			EnableContainerScan:    true,
@@ -446,14 +385,89 @@ func (s *QualysContainerSecuritySpec) GetContainerSensor() ContainerSensorConfig
 	}
 }
 
-// GetClusterSensor returns the cluster sensor config with defaults applied
+func (c *ContainerSensorConfig) GetEffectiveHostNetwork() bool {
+	if c.Security != nil && c.Security.HostNetwork != nil {
+		return *c.Security.HostNetwork
+	}
+	return c.PrivilegeMode != PrivilegeModeUnprivileged
+}
+
+func (c *ContainerSensorConfig) GetEffectiveHostPID() bool {
+	if c.Security != nil && c.Security.HostPID != nil {
+		return *c.Security.HostPID
+	}
+	return c.PrivilegeMode != PrivilegeModeUnprivileged
+}
+
+func (c *ContainerSensorConfig) GetEffectiveReadOnlyRootFilesystem() bool {
+	if c.Security != nil && c.Security.ReadOnlyRootFilesystem != nil {
+		return *c.Security.ReadOnlyRootFilesystem
+	}
+	return c.PrivilegeMode == PrivilegeModeUnprivileged
+}
+
+func (c *ContainerSensorConfig) GetEffectiveRunAsUser() *int64 {
+	if c.Security != nil && c.Security.RunAsUser != nil {
+		return c.Security.RunAsUser
+	}
+	if c.PrivilegeMode == PrivilegeModeUnprivileged {
+		uid := int64(65534)
+		return &uid
+	}
+	uid := int64(0)
+	return &uid
+}
+
+func (c *ContainerSensorConfig) GetEffectiveRunAsGroup() *int64 {
+	if c.Security != nil && c.Security.RunAsGroup != nil {
+		return c.Security.RunAsGroup
+	}
+	if c.PrivilegeMode == PrivilegeModeUnprivileged {
+		gid := int64(65534)
+		return &gid
+	}
+	return nil
+}
+
+func (c *ContainerSensorConfig) GetRuntimeSocketGroup() *int64 {
+	if c.Security != nil && c.Security.RuntimeSocketGroup != nil {
+		return c.Security.RuntimeSocketGroup
+	}
+	return nil
+}
+
+func (c *ContainerSensorConfig) GetEffectiveSeccompProfile() corev1.SeccompProfileType {
+	if c.Security != nil && c.Security.SeccompProfile != "" {
+		switch c.Security.SeccompProfile {
+		case "RuntimeDefault":
+			return corev1.SeccompProfileTypeRuntimeDefault
+		case "Unconfined":
+			return corev1.SeccompProfileTypeUnconfined
+		case "Localhost":
+			return corev1.SeccompProfileTypeLocalhost
+		}
+	}
+	if c.PrivilegeMode == PrivilegeModeUnprivileged || c.PrivilegeMode == PrivilegeModeMinimal {
+		return corev1.SeccompProfileTypeRuntimeDefault
+	}
+	return corev1.SeccompProfileTypeUnconfined
+}
+
+func (c *ContainerSensorConfig) IsContainerScanAllowed() bool {
+	return c.PrivilegeMode != PrivilegeModeUnprivileged
+}
+
+func (c *ContainerSensorConfig) IsMalwareScanAllowed() bool {
+	return c.PrivilegeMode == PrivilegeModeStandard
+}
+
 func (s *QualysContainerSecuritySpec) GetClusterSensor() ClusterSensorConfig {
 	if s.ClusterSensor != nil {
 		cfg := *s.ClusterSensor
 		if cfg.Image == nil {
 			cfg.Image = &ImageSpec{
 				Repository: "qualys/cluster-sensor",
-				Tag:        "latest",
+				Tag:        "1.4.0-0",
 				PullPolicy: corev1.PullIfNotPresent,
 			}
 		}
@@ -461,31 +475,44 @@ func (s *QualysContainerSecuritySpec) GetClusterSensor() ClusterSensorConfig {
 			replicas := int32(1)
 			cfg.Replicas = &replicas
 		}
+		if cfg.CloudProvider == "" {
+			cfg.CloudProvider = CloudProviderSelfManagedK8S
+		}
+		if cfg.Logging == nil {
+			cfg.Logging = &SensorLoggingConfig{
+				LogLevel: 3,
+			}
+		}
 		return cfg
 	}
 	replicas := int32(1)
 	return ClusterSensorConfig{
-		Enabled: true,
+		Enabled: false,
 		Image: &ImageSpec{
 			Repository: "qualys/cluster-sensor",
-			Tag:        "latest",
+			Tag:        "1.4.0-0",
 			PullPolicy: corev1.PullIfNotPresent,
 		},
-		Replicas: &replicas,
+		Replicas:      &replicas,
+		CloudProvider: CloudProviderSelfManagedK8S,
+		K8sCompliance: true,
+		HostScanner: &HostScannerConfig{
+			Enabled:     true,
+			RunOnMaster: true,
+		},
 		Logging: &SensorLoggingConfig{
 			LogLevel: 3,
 		},
 	}
 }
 
-// GetAdmissionController returns the admission controller config with defaults applied
 func (s *QualysContainerSecuritySpec) GetAdmissionController() AdmissionControllerConfig {
 	if s.AdmissionController != nil {
 		cfg := *s.AdmissionController
 		if cfg.Image == nil {
 			cfg.Image = &ImageSpec{
 				Repository: "qualys/admission-controller",
-				Tag:        "latest",
+				Tag:        "1.1.2-0",
 				PullPolicy: corev1.PullIfNotPresent,
 			}
 		}
@@ -503,7 +530,7 @@ func (s *QualysContainerSecuritySpec) GetAdmissionController() AdmissionControll
 		Enabled: false,
 		Image: &ImageSpec{
 			Repository: "qualys/admission-controller",
-			Tag:        "latest",
+			Tag:        "1.1.2-0",
 			PullPolicy: corev1.PullIfNotPresent,
 		},
 		Replicas:      &replicas,
@@ -514,14 +541,13 @@ func (s *QualysContainerSecuritySpec) GetAdmissionController() AdmissionControll
 	}
 }
 
-// GetRuntimeSensor returns the runtime sensor config with defaults applied
 func (s *QualysContainerSecuritySpec) GetRuntimeSensor() RuntimeSensorConfig {
 	if s.RuntimeSensor != nil {
 		cfg := *s.RuntimeSensor
 		if cfg.Image == nil {
 			cfg.Image = &ImageSpec{
 				Repository: "qualys/runtime-sensor",
-				Tag:        "latest",
+				Tag:        "1.4.0-0",
 				PullPolicy: corev1.PullIfNotPresent,
 			}
 		}
@@ -531,7 +557,7 @@ func (s *QualysContainerSecuritySpec) GetRuntimeSensor() RuntimeSensorConfig {
 		Enabled: false,
 		Image: &ImageSpec{
 			Repository: "qualys/runtime-sensor",
-			Tag:        "latest",
+			Tag:        "1.4.0-0",
 			PullPolicy: corev1.PullIfNotPresent,
 		},
 		Logging: &SensorLoggingConfig{
@@ -540,22 +566,18 @@ func (s *QualysContainerSecuritySpec) GetRuntimeSensor() RuntimeSensorConfig {
 	}
 }
 
-// GetContainerRuntime returns the container runtime config with defaults applied
 func (s *QualysContainerSecuritySpec) GetContainerRuntime() ContainerRuntimeConfig {
 	if s.ContainerRuntime != nil {
 		return *s.ContainerRuntime
 	}
 	return ContainerRuntimeConfig{
-		Type: ContainerRuntimeAuto,
+		Type: ContainerRuntimeCRIO,
 		SocketPaths: &RuntimeSocketPaths{
-			Containerd: "/var/run/containerd/containerd.sock",
-			CRIO:       "/var/run/crio/crio.sock",
-			Docker:     "/var/run/docker.sock",
+			CRIO: "/var/run/crio/crio.sock",
 		},
 	}
 }
 
-// GetScheduling returns the scheduling config with defaults applied
 func (s *QualysContainerSecuritySpec) GetScheduling() SchedulingConfig {
 	if s.Scheduling != nil {
 		sched := *s.Scheduling
@@ -599,7 +621,6 @@ func (s *QualysContainerSecuritySpec) GetScheduling() SchedulingConfig {
 	}
 }
 
-// IsAnyComponentEnabled returns true if any component is enabled
 func (s *QualysContainerSecuritySpec) IsAnyComponentEnabled() bool {
 	if s.ContainerSensor != nil && s.ContainerSensor.Enabled {
 		return true

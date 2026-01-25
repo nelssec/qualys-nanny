@@ -1,0 +1,60 @@
+apiVersion: qualys.io/v1
+kind: QualysContainerSecurity
+metadata:
+  labels:
+    app.kubernetes.io/name: qualys-nanny
+    app.kubernetes.io/managed-by: kustomize
+  name: qualys-container-security
+  namespace: qualys
+spec:
+  platformConfigRef:
+    name: qualys-platform
+  containerSensor:
+    enabled: true
+    image:
+      repository: qualys/qcs-sensor
+      tag: "latest"
+      pullPolicy: IfNotPresent
+    mode: general
+    k8sMode: true
+    privilegeMode: standard
+    scanning:
+      enableImageScan: true
+      enableContainerScan: true
+      enableScaScan: true
+      scanThreadPoolSize: 2
+    storage:
+      usePersistentStorage: true
+      storageSize: "10Gi"
+    logging:
+      logLevel: 3
+  clusterSensor:
+    enabled: true
+    image:
+      repository: qualys/cluster-sensor
+      tag: "1.4.0-0"
+    replicas: 1
+    cloudProvider: AWS
+    clusterName: my-cluster
+    k8sCompliance: true
+    hostScanner:
+      enabled: true
+      runOnMaster: true
+  admissionController:
+    enabled: false
+    image:
+      repository: qualys/admission-controller
+      tag: "1.1.2-0"
+    replicas: 2
+    failurePolicy: Ignore
+  runtimeSensor:
+    enabled: false
+  scheduling:
+    nodeSelector:
+      kubernetes.io/os: linux
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: NoExecute
+    priorityClassName: system-node-critical

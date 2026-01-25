@@ -2,9 +2,8 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
-- bases/qualys.qualys.io_qualysplatformconfigs.yaml
-- bases/qualys.qualys.io_qualyscloudagents.yaml
-- bases/qualys.qualys.io_qualyscontainersecurities.yaml
+- bases/qualys.io_qualysplatformconfigs.yaml
+- bases/qualys.io_qualyscontainersecurities.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

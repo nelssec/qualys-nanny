@@ -8,13 +8,13 @@ metadata:
   name: qualys-qualyscontainersecurity-admin-role
 rules:
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualyscontainersecurities
   verbs:
   - '*'
 - apiGroups:
-  - qualys.qualys.io
+  - qualys.io
   resources:
   - qualyscontainersecurities/status
   verbs:
