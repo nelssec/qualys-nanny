@@ -434,7 +434,7 @@ metadata:
     capabilities: Full Lifecycle
     categories: Security
     containerImage: quay.io/nelssec/qualys-nanny:v0.1.0
-    createdAt: "2026-01-25T15:44:18Z"
+    createdAt: "2026-01-25T16:40:50Z"
     description: Automatically deploy and manage Qualys Container Security Sensor
       on OpenShift clusters
     operators.operatorframework.io/builder: operator-sdk-v1.42.0
