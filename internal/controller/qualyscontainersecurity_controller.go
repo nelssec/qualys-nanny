@@ -1517,6 +1517,9 @@ func buildContainerSensorArgs(cfg qualysv1.ContainerSensorConfig, runtimeName st
 	}
 	if runtimeName != "" {
 		args = append(args, "--container-runtime", runtimeName)
+		if runtimeName == "cri-o" {
+			args = append(args, "--storage-driver-type", "overlay")
+		}
 	}
 	switch cfg.Mode {
 	case qualysv1.ContainerSensorModeCICD:
@@ -1554,6 +1557,7 @@ func buildContainerSensorEnvVars(secretName, serverUri string) []corev1.EnvVar {
 		{Name: "QUALYS_POD_NAME", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.name"}}},
 		{Name: "QUALYS_POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
 		{Name: "QUALYS_SENSOR_HOST_IP", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.hostIP"}}},
+		{Name: "HOME", Value: "/usr/local/qualys/qpa/data"},
 	}
 }
 
