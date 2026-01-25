@@ -2,6 +2,9 @@
 
 Kubernetes operator for deploying and managing Qualys security components on OpenShift and Kubernetes clusters.
 
+[![OperatorHub](https://img.shields.io/badge/OperatorHub.io-qualys--nanny-blue)](https://operatorhub.io/operator/qualys-nanny)
+[![Quay.io](https://img.shields.io/badge/Quay.io-nelssec%2Fqualys--nanny-red)](https://quay.io/repository/nelssec/qualys-nanny)
+
 ## Components Managed
 
 | Component | Type | Description |
@@ -14,13 +17,31 @@ Kubernetes operator for deploying and managing Qualys security components on Ope
 
 ## Quick Start
 
-### 1. Install the Operator
+### Option A: Install from OperatorHub (Recommended)
 
+**OpenShift:**
+1. Navigate to **Operators → OperatorHub** in the OpenShift Console
+2. Search for "**Qualys Nanny**"
+3. Click **Install** and follow the prompts
+
+**Kubernetes with OLM:**
+```bash
+kubectl create -f https://operatorhub.io/install/qualys-nanny.yaml
+kubectl get csv -n operators
+```
+
+### Option B: Install from Manifests
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/nelssec/qualys-nanny/main/dist/install.yaml
+```
+
+Or clone and apply locally:
 ```bash
 kubectl apply -f dist/install.yaml
 ```
 
-### 2. Create Credentials Secret
+### 1. Create Credentials Secret
 
 ```bash
 kubectl create secret generic qualys-credentials \
@@ -29,7 +50,7 @@ kubectl create secret generic qualys-credentials \
   --from-literal=ACTIVATION_ID=<your-activation-id>
 ```
 
-### 3. Create Platform Configuration
+### 2. Create Platform Configuration
 
 ```yaml
 apiVersion: qualys.io/v1
@@ -47,7 +68,7 @@ spec:
       namespace: qualys
 ```
 
-### 4. Deploy Container Security
+### 3. Deploy Container Security
 
 ```yaml
 apiVersion: qualys.io/v1

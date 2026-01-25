@@ -87,9 +87,47 @@ Uses eBPF for kernel-level visibility into container behavior.
 - Qualys subscription with Container Security module
 - CUSTOMER_ID and ACTIVATION_ID from Qualys portal
 
-### Step 1: Install the Operator
+### Option A: Install from OperatorHub (Recommended)
+
+The Qualys Nanny Operator is available on [OperatorHub.io](https://operatorhub.io/operator/qualys-nanny).
+
+**OpenShift Console:**
+1. Navigate to **Operators → OperatorHub**
+2. Search for "**Qualys Nanny**"
+3. Click **Install**
+4. Select the target namespace and approval strategy
+5. Click **Install** to deploy the operator
+
+**Kubernetes with OLM:**
+
+First, install OLM if not already present:
+```bash
+curl -sL https://github.com/operator-framework/operator-lifecycle-manager/releases/download/v0.28.0/install.sh | bash -s v0.28.0
+```
+
+Then install the operator:
+```bash
+kubectl create -f https://operatorhub.io/install/qualys-nanny.yaml
+kubectl get csv -n operators
+```
+
+Wait for the operator to be ready:
+```bash
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded csv -n operators -l operators.coreos.com/qualys-nanny.operators
+```
+
+### Option B: Install from Manifests
+
+For environments without OLM, install directly from manifests:
 
 ```bash
+kubectl apply -f https://raw.githubusercontent.com/nelssec/qualys-nanny/main/dist/install.yaml
+```
+
+Or clone the repository and apply locally:
+```bash
+git clone https://github.com/nelssec/qualys-nanny.git
+cd qualys-nanny
 kubectl apply -f dist/install.yaml
 ```
 
@@ -98,7 +136,7 @@ This creates:
 - CRDs for QualysPlatformConfig and QualysContainerSecurity
 - Operator deployment with required RBAC
 
-### Step 2: Create Credentials
+### Step 1: Create Credentials
 
 ```bash
 kubectl create secret generic qualys-credentials \
@@ -107,7 +145,7 @@ kubectl create secret generic qualys-credentials \
   --from-literal=ACTIVATION_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-### Step 3: Configure Platform URLs
+### Step 2: Configure Platform URLs
 
 Create a QualysPlatformConfig with your regional URLs:
 
@@ -129,7 +167,7 @@ spec:
 
 Find your regional URLs: https://www.qualys.com/platform-identification
 
-### Step 4: Deploy Container Security
+### Step 3: Deploy Container Security
 
 ```yaml
 apiVersion: qualys.io/v1
@@ -193,6 +231,43 @@ The Container Sensor supports four privilege modes:
 - Use when: Runtime Sensor (eBPF) required
 
 **Key Point:** The Container Sensor does NOT require `privileged: true`. Standard mode provides full scanning capabilities with specific Linux capabilities instead of full privileges.
+
+## Scanning Policies
+
+The Container Sensor supports three scanning policies to control how vulnerabilities are detected:
+
+### DynamicWithStaticScanningAsFallback (Default)
+```yaml
+containerSensor:
+  scanning:
+    scanningPolicy: DynamicWithStaticScanningAsFallback
+```
+- Attempts dynamic scanning first (running containers)
+- Falls back to static image scanning if dynamic fails
+- Best balance of accuracy and coverage
+
+### DynamicScanningOnly
+```yaml
+containerSensor:
+  scanning:
+    scanningPolicy: DynamicScanningOnly
+```
+- Only scans running containers
+- Requires container to be running for vulnerability detection
+- Most accurate for runtime state
+
+### StaticScanningOnly
+```yaml
+containerSensor:
+  scanning:
+    scanningPolicy: StaticScanningOnly
+```
+- Scans images directly from container storage
+- Works in unprivileged/standard modes on CRI-O
+- Does not require containers to be running
+- Best for CI/CD and air-gapped environments
+
+**Note:** Static scanning on CRI-O uses the `--storage-driver crio-overlay` option which allows direct access to image layers without requiring privileged user namespaces.
 
 ## RBAC Permissions
 
@@ -439,6 +514,37 @@ The operator includes sample configurations in `config/samples/`:
 | `qualys_operator_containersecurity_minimal.yaml` | Minimal privileges |
 | `qualys_operator_containersecurity_unprivileged.yaml` | Unprivileged mode |
 | `qualys_operator_containersecurity_privileged.yaml` | Full features + Runtime Sensor |
+
+## Updating the Operator
+
+### OperatorHub Updates
+
+If installed via OperatorHub, updates are managed automatically based on your approval strategy:
+
+- **Automatic:** Updates install automatically when new versions are released
+- **Manual:** You'll be notified of updates and must approve them
+
+To check for updates in OpenShift:
+1. Navigate to **Operators → Installed Operators**
+2. Look for the **Upgrade available** indicator
+3. Click to review and approve the update
+
+### Manual Updates
+
+For manifest-based installations:
+```bash
+kubectl apply -f https://raw.githubusercontent.com/nelssec/qualys-nanny/main/dist/install.yaml
+```
+
+The operator will automatically update the managed sensors when the Custom Resources are reconciled.
+
+## Resources
+
+- **GitHub Repository:** https://github.com/nelssec/qualys-nanny
+- **OperatorHub:** https://operatorhub.io/operator/qualys-nanny
+- **Container Images:** https://quay.io/repository/nelssec/qualys-nanny
+- **Qualys Platform URLs:** https://www.qualys.com/platform-identification
+- **Qualys Container Security Docs:** https://www.qualys.com/docs/qualys-container-security-user-guide.pdf
 
 ## License
 

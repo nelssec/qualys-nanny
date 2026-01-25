@@ -441,7 +441,7 @@ metadata:
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
     repository: https://github.com/nelssec/qualys-nanny
     support: NelsSec
-  name: qualys-nanny.v0.0.1
+  name: qualys-nanny.v0.1.0
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
@@ -801,4 +801,4 @@ spec:
   provider:
     name: NelsSec
     url: https://github.com/nelssec
-  version: 0.0.1
+  version: 0.1.0
