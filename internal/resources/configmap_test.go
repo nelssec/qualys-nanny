@@ -137,3 +137,65 @@ func TestBuildContainerSensorConfigMapWithMalwareAndSecret(t *testing.T) {
 		t.Errorf("expected CONTAINER_LAUNCH_TIMEOUT '60s', got '%s'", cm.Data["CONTAINER_LAUNCH_TIMEOUT"])
 	}
 }
+
+func TestBuildContainerSensorConfigMapWithProxy(t *testing.T) {
+	platformConfig := &qualysv1.QualysPlatformConfig{
+		Spec: qualysv1.QualysPlatformConfigSpec{
+			Platform: qualysv1.PlatformSettings{
+				ServerUri: "https://test.qualys.com/ContainerSensor",
+				Proxy: &qualysv1.ProxyConfig{
+					QualysHttpsProxy: "http://proxy.qualys.com:8080",
+					HttpsProxy:       "http://proxy.corp.com:3128",
+					ProxyOrder:       "sequential",
+					ProxyFailOpen:    true,
+					CACertBundle:     "/etc/ssl/certs/ca-bundle.crt",
+				},
+			},
+		},
+	}
+
+	sensorConfig := qualysv1.ContainerSensorConfig{
+		Mode: qualysv1.ContainerSensorModeGeneral,
+	}
+
+	cm := BuildContainerSensorConfigMap("test-cm", "test-ns", platformConfig, sensorConfig)
+
+	if cm.Data["QUALYS_HTTPS_PROXY"] != "http://proxy.qualys.com:8080" {
+		t.Errorf("expected QUALYS_HTTPS_PROXY 'http://proxy.qualys.com:8080', got '%s'", cm.Data["QUALYS_HTTPS_PROXY"])
+	}
+	if cm.Data["HTTPS_PROXY"] != "http://proxy.corp.com:3128" {
+		t.Errorf("expected HTTPS_PROXY 'http://proxy.corp.com:3128', got '%s'", cm.Data["HTTPS_PROXY"])
+	}
+	if cm.Data["PROXY_ORDER"] != "sequential" {
+		t.Errorf("expected PROXY_ORDER 'sequential', got '%s'", cm.Data["PROXY_ORDER"])
+	}
+	if cm.Data["PROXY_FAIL_OPEN"] != "true" {
+		t.Errorf("expected PROXY_FAIL_OPEN 'true', got '%s'", cm.Data["PROXY_FAIL_OPEN"])
+	}
+	if cm.Data["CA_CERT_BUNDLE"] != "/etc/ssl/certs/ca-bundle.crt" {
+		t.Errorf("expected CA_CERT_BUNDLE '/etc/ssl/certs/ca-bundle.crt', got '%s'", cm.Data["CA_CERT_BUNDLE"])
+	}
+}
+
+func TestBuildContainerSensorConfigMapWithoutProxy(t *testing.T) {
+	platformConfig := &qualysv1.QualysPlatformConfig{
+		Spec: qualysv1.QualysPlatformConfigSpec{
+			Platform: qualysv1.PlatformSettings{
+				ServerUri: "https://test.qualys.com/ContainerSensor",
+			},
+		},
+	}
+
+	sensorConfig := qualysv1.ContainerSensorConfig{
+		Mode: qualysv1.ContainerSensorModeGeneral,
+	}
+
+	cm := BuildContainerSensorConfigMap("test-cm", "test-ns", platformConfig, sensorConfig)
+
+	if _, ok := cm.Data["QUALYS_HTTPS_PROXY"]; ok {
+		t.Error("expected QUALYS_HTTPS_PROXY to not be set when proxy is nil")
+	}
+	if _, ok := cm.Data["HTTPS_PROXY"]; ok {
+		t.Error("expected HTTPS_PROXY to not be set when proxy is nil")
+	}
+}

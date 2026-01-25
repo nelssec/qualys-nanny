@@ -483,7 +483,7 @@ spec:
                         type: string
                     type: object
                   type:
-                    default: auto
+                    default: cri-o
                     enum:
                     - cri-o
                     - containerd
@@ -664,6 +664,18 @@ spec:
                         maximum: 10
                         minimum: 1
                         type: integer
+                      scanningPolicy:
+                        allOf:
+                        - enum:
+                          - DynamicWithStaticScanningAsFallback
+                          - DynamicScanningOnly
+                          - StaticScanningOnly
+                        - enum:
+                          - DynamicWithStaticScanningAsFallback
+                          - DynamicScanningOnly
+                          - StaticScanningOnly
+                        default: DynamicWithStaticScanningAsFallback
+                        type: string
                     type: object
                   security:
                     properties:

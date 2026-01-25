@@ -49,6 +49,15 @@ const (
 	PrivilegeModePrivileged   PrivilegeMode = "privileged"
 )
 
+// +kubebuilder:validation:Enum=DynamicWithStaticScanningAsFallback;DynamicScanningOnly;StaticScanningOnly
+type ScanningPolicy string
+
+const (
+	ScanningPolicyDynamicWithStaticFallback ScanningPolicy = "DynamicWithStaticScanningAsFallback"
+	ScanningPolicyDynamicOnly               ScanningPolicy = "DynamicScanningOnly"
+	ScanningPolicyStaticOnly                ScanningPolicy = "StaticScanningOnly"
+)
+
 type QualysContainerSecuritySpec struct {
 	// +kubebuilder:validation:Required
 	PlatformConfigRef PlatformConfigReference `json:"platformConfigRef"`
@@ -216,6 +225,10 @@ type RuntimeSocketPaths struct {
 }
 
 type ScanningConfig struct {
+	// +kubebuilder:validation:Enum=DynamicWithStaticScanningAsFallback;DynamicScanningOnly;StaticScanningOnly
+	// +kubebuilder:default=DynamicWithStaticScanningAsFallback
+	ScanningPolicy ScanningPolicy `json:"scanningPolicy,omitempty"`
+
 	// +kubebuilder:default=true
 	EnableImageScan bool `json:"enableImageScan,omitempty"`
 
@@ -368,6 +381,7 @@ func (s *QualysContainerSecuritySpec) GetContainerSensor() ContainerSensorConfig
 		PrivilegeMode: PrivilegeModeStandard,
 		K8sMode:       true,
 		Scanning: &ScanningConfig{
+			ScanningPolicy:         ScanningPolicyDynamicWithStaticFallback,
 			EnableImageScan:        true,
 			EnableContainerScan:    true,
 			ScanThreadPoolSize:     2,

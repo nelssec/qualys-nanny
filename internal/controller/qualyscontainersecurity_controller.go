@@ -1531,12 +1531,12 @@ func buildContainerSensorArgs(cfg qualysv1.ContainerSensorConfig, runtimeName st
 		args = append(args, "--sensor-without-persistent-storage")
 	}
 	if cfg.Scanning != nil {
-		if !cfg.Scanning.EnableImageScan {
-			args = append(args, "--disableImageScan")
+		policy := cfg.Scanning.ScanningPolicy
+		if policy == "" {
+			policy = qualysv1.ScanningPolicyDynamicWithStaticFallback
 		}
-		if !cfg.Scanning.EnableContainerScan {
-			args = append(args, "--disableContainerScan")
-		}
+		args = append(args, "--scanning-policy", string(policy))
+
 		if cfg.Scanning.EnableScaScan {
 			args = append(args, "--perform-sca-scan")
 		}

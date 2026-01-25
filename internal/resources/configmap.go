@@ -71,6 +71,25 @@ func BuildContainerSensorConfigMap(name, namespace string, platformConfig *qualy
 		}
 	}
 
+	if platformConfig.Spec.Platform.Proxy != nil {
+		proxy := platformConfig.Spec.Platform.Proxy
+		if proxy.QualysHttpsProxy != "" {
+			data["QUALYS_HTTPS_PROXY"] = proxy.QualysHttpsProxy
+		}
+		if proxy.HttpsProxy != "" {
+			data["HTTPS_PROXY"] = proxy.HttpsProxy
+		}
+		if proxy.ProxyOrder != "" {
+			data["PROXY_ORDER"] = proxy.ProxyOrder
+		}
+		if proxy.ProxyFailOpen {
+			data["PROXY_FAIL_OPEN"] = boolTrue
+		}
+		if proxy.CACertBundle != "" {
+			data["CA_CERT_BUNDLE"] = proxy.CACertBundle
+		}
+	}
+
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
