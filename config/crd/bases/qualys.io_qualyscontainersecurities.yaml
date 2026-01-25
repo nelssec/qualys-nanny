@@ -483,7 +483,7 @@ spec:
                         type: string
                     type: object
                   type:
-                    default: auto
+                    default: cri-o
                     enum:
                     - cri-o
                     - containerd

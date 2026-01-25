@@ -192,7 +192,7 @@ type RuntimeSensorConfig struct {
 }
 
 type ContainerRuntimeConfig struct {
-	// +kubebuilder:default=auto
+	// +kubebuilder:default=cri-o
 	Type ContainerRuntimeType `json:"type,omitempty"`
 
 	SocketPaths *RuntimeSocketPaths `json:"socketPaths,omitempty"`
