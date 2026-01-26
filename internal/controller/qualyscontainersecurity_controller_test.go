@@ -206,7 +206,7 @@ var _ = Describe("QualysContainerSecurity Controller", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
+			Expect(result.RequeueAfter).To(BeZero())
 		})
 
 		It("should handle missing platform config", func() {

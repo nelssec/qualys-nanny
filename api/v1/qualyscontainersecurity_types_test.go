@@ -22,6 +22,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	testPriorityClassName = "system-node-critical"
+	testIgnoreValue       = "Ignore"
+)
+
 func TestGetContainerSensorWithNil(t *testing.T) {
 	spec := &QualysContainerSecuritySpec{}
 	cfg := spec.GetContainerSensor()
@@ -595,7 +600,7 @@ func TestGetAdmissionController(t *testing.T) {
 		if cfg.Replicas == nil || *cfg.Replicas != 2 {
 			t.Error("expected Replicas to be 2")
 		}
-		if cfg.FailurePolicy != "Ignore" {
+		if cfg.FailurePolicy != testIgnoreValue {
 			t.Errorf("expected FailurePolicy 'Ignore', got '%s'", cfg.FailurePolicy)
 		}
 	})
@@ -611,7 +616,7 @@ func TestGetAdmissionController(t *testing.T) {
 		if !cfg.Enabled {
 			t.Error("expected Enabled to be true")
 		}
-		if cfg.FailurePolicy != "Ignore" {
+		if cfg.FailurePolicy != testIgnoreValue {
 			t.Errorf("expected FailurePolicy to default to 'Ignore', got '%s'", cfg.FailurePolicy)
 		}
 	})
@@ -685,7 +690,7 @@ func TestGetScheduling(t *testing.T) {
 		if len(cfg.Tolerations) != 2 {
 			t.Error("expected 2 default tolerations")
 		}
-		if cfg.PriorityClassName != "system-node-critical" {
+		if cfg.PriorityClassName != testPriorityClassName {
 			t.Errorf("expected PriorityClassName 'system-node-critical', got '%s'", cfg.PriorityClassName)
 		}
 	})
@@ -702,7 +707,7 @@ func TestGetScheduling(t *testing.T) {
 		if len(cfg.Tolerations) == 0 {
 			t.Error("expected tolerations to be filled in")
 		}
-		if cfg.PriorityClassName != "system-node-critical" {
+		if cfg.PriorityClassName != testPriorityClassName {
 			t.Errorf("expected PriorityClassName to default to 'system-node-critical', got '%s'", cfg.PriorityClassName)
 		}
 	})

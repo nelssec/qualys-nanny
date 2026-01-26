@@ -35,7 +35,7 @@ func TestNewResolver(t *testing.T) {
 
 	resolver := NewResolver(client)
 	if resolver == nil {
-		t.Error("expected resolver to not be nil")
+		t.Fatal("expected resolver to not be nil")
 	}
 	if resolver.client == nil {
 		t.Error("expected resolver client to not be nil")

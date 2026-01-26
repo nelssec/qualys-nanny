@@ -22,6 +22,8 @@ import (
 	qualysv1 "github.com/nelssec/qualys-nanny/api/v1"
 )
 
+const testNamespace = "test-ns"
+
 func TestBuildContainerSensorConfigMap(t *testing.T) {
 	platformConfig := &qualysv1.QualysPlatformConfig{
 		Spec: qualysv1.QualysPlatformConfigSpec{
@@ -47,13 +49,13 @@ func TestBuildContainerSensorConfigMap(t *testing.T) {
 		},
 	}
 
-	cm := BuildContainerSensorConfigMap("test-cm", "test-ns", platformConfig, sensorConfig)
+	cm := BuildContainerSensorConfigMap("test-cm", testNamespace, platformConfig, sensorConfig)
 
 	if cm.Name != "test-cm" {
 		t.Errorf("expected name 'test-cm', got '%s'", cm.Name)
 	}
-	if cm.Namespace != "test-ns" {
-		t.Errorf("expected namespace 'test-ns', got '%s'", cm.Namespace)
+	if cm.Namespace != testNamespace {
+		t.Errorf("expected namespace 'testNamespace', got '%s'", cm.Namespace)
 	}
 	if cm.Data["SERVER_URI"] != "https://test.qualys.com/ContainerSensor" {
 		t.Errorf("expected SERVER_URI 'https://test.qualys.com/ContainerSensor', got '%s'", cm.Data["SERVER_URI"])
@@ -61,13 +63,13 @@ func TestBuildContainerSensorConfigMap(t *testing.T) {
 	if cm.Data["MODE"] != "general" {
 		t.Errorf("expected MODE 'general', got '%s'", cm.Data["MODE"])
 	}
-	if cm.Data["K8S_MODE"] != "true" {
+	if cm.Data["K8S_MODE"] != boolTrue {
 		t.Errorf("expected K8S_MODE 'true', got '%s'", cm.Data["K8S_MODE"])
 	}
-	if cm.Data["ENABLE_IMAGE_SCAN"] != "true" {
+	if cm.Data["ENABLE_IMAGE_SCAN"] != boolTrue {
 		t.Errorf("expected ENABLE_IMAGE_SCAN 'true', got '%s'", cm.Data["ENABLE_IMAGE_SCAN"])
 	}
-	if cm.Data["ENABLE_CONTAINER_SCAN"] != "true" {
+	if cm.Data["ENABLE_CONTAINER_SCAN"] != boolTrue {
 		t.Errorf("expected ENABLE_CONTAINER_SCAN 'true', got '%s'", cm.Data["ENABLE_CONTAINER_SCAN"])
 	}
 	if cm.Data["SCAN_THREAD_POOL_SIZE"] != "4" {
@@ -76,7 +78,7 @@ func TestBuildContainerSensorConfigMap(t *testing.T) {
 	if cm.Data["LOG_LEVEL"] != "3" {
 		t.Errorf("expected LOG_LEVEL '3', got '%s'", cm.Data["LOG_LEVEL"])
 	}
-	if cm.Data["ENABLE_CONSOLE_LOGS"] != "true" {
+	if cm.Data["ENABLE_CONSOLE_LOGS"] != boolTrue {
 		t.Errorf("expected ENABLE_CONSOLE_LOGS 'true', got '%s'", cm.Data["ENABLE_CONSOLE_LOGS"])
 	}
 }
@@ -94,7 +96,7 @@ func TestBuildContainerSensorConfigMapMinimal(t *testing.T) {
 		Mode: qualysv1.ContainerSensorModeGeneral,
 	}
 
-	cm := BuildContainerSensorConfigMap("test-cm", "test-ns", platformConfig, sensorConfig)
+	cm := BuildContainerSensorConfigMap("test-cm", testNamespace, platformConfig, sensorConfig)
 
 	if cm.Data["SERVER_URI"] != "https://test.qualys.com/ContainerSensor" {
 		t.Errorf("expected SERVER_URI to be set")
@@ -125,12 +127,12 @@ func TestBuildContainerSensorConfigMapWithMalwareAndSecret(t *testing.T) {
 		},
 	}
 
-	cm := BuildContainerSensorConfigMap("test-cm", "test-ns", platformConfig, sensorConfig)
+	cm := BuildContainerSensorConfigMap("test-cm", testNamespace, platformConfig, sensorConfig)
 
-	if cm.Data["ENABLE_MALWARE_DETECTION"] != "true" {
+	if cm.Data["ENABLE_MALWARE_DETECTION"] != boolTrue {
 		t.Errorf("expected ENABLE_MALWARE_DETECTION 'true', got '%s'", cm.Data["ENABLE_MALWARE_DETECTION"])
 	}
-	if cm.Data["ENABLE_SECRET_DETECTION"] != "true" {
+	if cm.Data["ENABLE_SECRET_DETECTION"] != boolTrue {
 		t.Errorf("expected ENABLE_SECRET_DETECTION 'true', got '%s'", cm.Data["ENABLE_SECRET_DETECTION"])
 	}
 	if cm.Data["CONTAINER_LAUNCH_TIMEOUT"] != "60s" {
@@ -158,7 +160,7 @@ func TestBuildContainerSensorConfigMapWithProxy(t *testing.T) {
 		Mode: qualysv1.ContainerSensorModeGeneral,
 	}
 
-	cm := BuildContainerSensorConfigMap("test-cm", "test-ns", platformConfig, sensorConfig)
+	cm := BuildContainerSensorConfigMap("test-cm", testNamespace, platformConfig, sensorConfig)
 
 	if cm.Data["QUALYS_HTTPS_PROXY"] != "http://proxy.qualys.com:8080" {
 		t.Errorf("expected QUALYS_HTTPS_PROXY 'http://proxy.qualys.com:8080', got '%s'", cm.Data["QUALYS_HTTPS_PROXY"])
@@ -169,7 +171,7 @@ func TestBuildContainerSensorConfigMapWithProxy(t *testing.T) {
 	if cm.Data["PROXY_ORDER"] != "sequential" {
 		t.Errorf("expected PROXY_ORDER 'sequential', got '%s'", cm.Data["PROXY_ORDER"])
 	}
-	if cm.Data["PROXY_FAIL_OPEN"] != "true" {
+	if cm.Data["PROXY_FAIL_OPEN"] != boolTrue {
 		t.Errorf("expected PROXY_FAIL_OPEN 'true', got '%s'", cm.Data["PROXY_FAIL_OPEN"])
 	}
 	if cm.Data["CA_CERT_BUNDLE"] != "/etc/ssl/certs/ca-bundle.crt" {
@@ -190,7 +192,7 @@ func TestBuildContainerSensorConfigMapWithoutProxy(t *testing.T) {
 		Mode: qualysv1.ContainerSensorModeGeneral,
 	}
 
-	cm := BuildContainerSensorConfigMap("test-cm", "test-ns", platformConfig, sensorConfig)
+	cm := BuildContainerSensorConfigMap("test-cm", testNamespace, platformConfig, sensorConfig)
 
 	if _, ok := cm.Data["QUALYS_HTTPS_PROXY"]; ok {
 		t.Error("expected QUALYS_HTTPS_PROXY to not be set when proxy is nil")

@@ -43,6 +43,11 @@ import (
 	"github.com/nelssec/qualys-nanny/internal/resources"
 )
 
+const (
+	crioSocketPath = "/var/run/crio/crio.sock"
+	logLevelInfo   = "info"
+)
+
 type QualysContainerSecurityReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
@@ -949,7 +954,7 @@ func getDefaultSocketGID(_ platform.ContainerRuntime) int64 {
 	return 0
 }
 
-func (r *QualysContainerSecurityReconciler) buildClusterSensorDeployment(sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string) *appsv1.Deployment {
+func (r *QualysContainerSecurityReconciler) buildClusterSensorDeployment(sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, _, serviceAccountName string) *appsv1.Deployment {
 	cfg := sensor.Spec.GetClusterSensor()
 
 	labels := map[string]string{
@@ -1056,14 +1061,14 @@ func (r *QualysContainerSecurityReconciler) buildClusterSensorArgs(cfg qualysv1.
 	}
 
 	if cfg.Logging != nil {
-		logLevel := "info"
+		logLevel := logLevelInfo
 		switch cfg.Logging.LogLevel {
 		case 0, 1:
 			logLevel = "error"
 		case 2:
 			logLevel = "warn"
 		case 3:
-			logLevel = "info"
+			logLevel = logLevelInfo
 		case 4, 5:
 			logLevel = "debug"
 		}
@@ -1197,7 +1202,7 @@ func (r *QualysContainerSecurityReconciler) buildRuntimeSensorDaemonSet(sensor *
 
 	if rt == platform.RuntimeCRIO {
 		runtimeConfig := sensor.Spec.GetContainerRuntime()
-		socketPath := "/var/run/crio/crio.sock"
+		socketPath := crioSocketPath
 		if runtimeConfig.SocketPaths != nil && runtimeConfig.SocketPaths.CRIO != "" {
 			socketPath = runtimeConfig.SocketPaths.CRIO
 		}
@@ -1272,14 +1277,14 @@ func (r *QualysContainerSecurityReconciler) buildRuntimeSensorArgs(cfg qualysv1.
 	}
 
 	if cfg.Logging != nil {
-		logLevel := "info"
+		logLevel := logLevelInfo
 		switch cfg.Logging.LogLevel {
 		case 0, 1:
 			logLevel = "error"
 		case 2:
 			logLevel = "warn"
 		case 3:
-			logLevel = "info"
+			logLevel = logLevelInfo
 		case 4, 5:
 			logLevel = "debug"
 		}
@@ -1730,7 +1735,7 @@ func getSocketPath(runtimeConfig qualysv1.ContainerRuntimeConfig, rt platform.Co
 	if runtimeConfig.SocketPaths == nil {
 		switch rt {
 		case platform.RuntimeCRIO:
-			return "/var/run/crio/crio.sock"
+			return crioSocketPath
 		case platform.RuntimeDocker:
 			return "/var/run/docker.sock"
 		default:
@@ -1743,7 +1748,7 @@ func getSocketPath(runtimeConfig qualysv1.ContainerRuntimeConfig, rt platform.Co
 		if runtimeConfig.SocketPaths.CRIO != "" {
 			return runtimeConfig.SocketPaths.CRIO
 		}
-		return "/var/run/crio/crio.sock"
+		return crioSocketPath
 	case platform.RuntimeDocker:
 		if runtimeConfig.SocketPaths.Docker != "" {
 			return runtimeConfig.SocketPaths.Docker
