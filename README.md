@@ -136,7 +136,7 @@ The Container Sensor supports four privilege modes to balance security requireme
 
 ### Minimum Privilege Configuration (Recommended)
 
-For environments requiring minimum privileges, use `minimal` mode:
+For environments requiring minimum privileges (including ROSA and strict SELinux), use `minimal` mode with non-persistent storage:
 
 ```yaml
 spec:
@@ -144,6 +144,11 @@ spec:
     privilegeMode: minimal
     scanning:
       scanningPolicy: StaticScanningOnly  # or DynamicScanningOnly for CRI-O 1.31+
+    storage:
+      usePersistentStorage: false
+    logging:
+      enableConsoleLogs: true
+      logLevel: 4
 ```
 
 This runs with:
@@ -151,6 +156,8 @@ This runs with:
 - `runAsUser: 0` (root required by sensor binary)
 - Only `SYS_PTRACE` capability
 - Read-only access to container storage
+- No SELinux issues (uses emptyDir volumes)
+- Console logging for easy `kubectl logs` access
 
 ## CRI-O Compatibility
 

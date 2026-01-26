@@ -585,7 +585,7 @@ func (r *QualysContainerSecurityReconciler) reconcileContainerSensorDaemonSet(ct
 	}
 
 	existing := &appsv1.DaemonSet{}
-	err := r.Get(ctx, types.NamespacedName{Name: ds.Name, Namespace: sensor.Namespace}, existing)
+	err := r.Get(ctx, types.NamespacedName{Name: ds.Name, Namespace: ds.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			r.Recorder.Event(sensor, corev1.EventTypeNormal, "ContainerSensorCreated", "Created Container Sensor DaemonSet")
@@ -594,9 +594,16 @@ func (r *QualysContainerSecurityReconciler) reconcileContainerSensorDaemonSet(ct
 		return err
 	}
 
-	existing.Spec = ds.Spec
-	existing.Labels = ds.Labels
-	return r.Update(ctx, existing)
+	existingEnvCount := len(existing.Spec.Template.Spec.Containers[0].Env)
+	desiredEnvCount := len(ds.Spec.Template.Spec.Containers[0].Env)
+	if existingEnvCount != desiredEnvCount {
+		existing.Spec.Template = ds.Spec.Template
+		existing.Spec.UpdateStrategy = ds.Spec.UpdateStrategy
+		r.Recorder.Event(sensor, corev1.EventTypeNormal, "ContainerSensorUpdated", fmt.Sprintf("Updated Container Sensor DaemonSet (env vars: %d -> %d)", existingEnvCount, desiredEnvCount))
+		return r.Update(ctx, existing)
+	}
+
+	return nil
 }
 
 func (r *QualysContainerSecurityReconciler) reconcileClusterSensorDeployment(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, platformConfig *qualysv1.QualysPlatformConfig, secretName, serviceAccountName string) error {
@@ -607,7 +614,7 @@ func (r *QualysContainerSecurityReconciler) reconcileClusterSensorDeployment(ctx
 	}
 
 	existing := &appsv1.Deployment{}
-	err := r.Get(ctx, types.NamespacedName{Name: deploy.Name, Namespace: sensor.Namespace}, existing)
+	err := r.Get(ctx, types.NamespacedName{Name: deploy.Name, Namespace: deploy.Namespace}, existing)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			r.Recorder.Event(sensor, corev1.EventTypeNormal, "ClusterSensorCreated", "Created Cluster Sensor Deployment")
@@ -616,9 +623,7 @@ func (r *QualysContainerSecurityReconciler) reconcileClusterSensorDeployment(ctx
 		return err
 	}
 
-	existing.Spec = deploy.Spec
-	existing.Labels = deploy.Labels
-	return r.Update(ctx, existing)
+	return nil
 }
 
 func (r *QualysContainerSecurityReconciler) reconcileAdmissionService(ctx context.Context, sensor *qualysv1.QualysContainerSecurity, name string) error {
@@ -782,7 +787,8 @@ func (r *QualysContainerSecurityReconciler) buildContainerSensorDaemonSet(sensor
 
 	args := buildContainerSensorArgs(cfg, runtimeName)
 	envVars := buildContainerSensorEnvVars(secretName, platformConfig.Spec.Platform.ServerUri, cfg)
-	volumeMounts, volumes := buildContainerSensorVolumes(socketPath, rt, cfg.PrivilegeMode)
+	usePersistentStorage := cfg.Storage == nil || cfg.Storage.UsePersistentStorage
+	volumeMounts, volumes := buildContainerSensorVolumes(socketPath, rt, cfg.PrivilegeMode, usePersistentStorage)
 
 	var resourceReqs corev1.ResourceRequirements
 	if cfg.Resources != nil {
@@ -1561,6 +1567,7 @@ func buildContainerSensorEnvVars(secretName, serverUri string, cfg qualysv1.Cont
 		{Name: "QUALYS_POD_NAMESPACE", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.namespace"}}},
 		{Name: "QUALYS_SENSOR_HOST_IP", ValueFrom: &corev1.EnvVarSource{FieldRef: &corev1.ObjectFieldSelector{FieldPath: "status.hostIP"}}},
 		{Name: "HOME", Value: "/usr/local/qualys/qpa/data"},
+		{Name: "XDG_CACHE_HOME", Value: "/usr/local/qualys/qpa/data/.cache"},
 	}
 
 	if cfg.Scanning != nil && cfg.Scanning.ImageScanDelaySeconds > 0 {
@@ -1575,7 +1582,7 @@ func buildContainerSensorEnvVars(secretName, serverUri string, cfg qualysv1.Cont
 	return envVars
 }
 
-func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime, privilegeMode qualysv1.PrivilegeMode) ([]corev1.VolumeMount, []corev1.Volume) {
+func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime, privilegeMode qualysv1.PrivilegeMode, usePersistentStorage bool) ([]corev1.VolumeMount, []corev1.Volume) {
 	directoryOrCreate := corev1.HostPathDirectoryOrCreate
 	directory := corev1.HostPathDirectory
 	socket := corev1.HostPathSocket
@@ -1610,12 +1617,20 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "runtime-socket", MountPath: socketPath},
 			{Name: "host-root", MountPath: "/host", ReadOnly: true},
 			{Name: "sensor-data", MountPath: "/usr/local/qualys/qpa/data"},
+			{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"},
 			{Name: "tmp", MountPath: "/tmp"},
+		}
+		var sensorDataVolume corev1.Volume
+		if usePersistentStorage {
+			sensorDataVolume = corev1.Volume{Name: "sensor-data", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}}
+		} else {
+			sensorDataVolume = corev1.Volume{Name: "sensor-data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 		}
 		volumes := []corev1.Volume{
 			{Name: "runtime-socket", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
 			{Name: "host-root", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/", Type: &directory}}},
-			{Name: "sensor-data", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}},
+			sensorDataVolume,
+			{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		}
 		if rt == platform.RuntimeCRIO {
@@ -1635,11 +1650,21 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "socket-volume", MountPath: socketPath, ReadOnly: true},
 			{Name: "persistent-volume", MountPath: "/usr/local/qualys/qpa/data"},
 			{Name: "agent-volume", MountPath: "/usr/local/qualys/qpa/data/conf/agent-data"},
+			{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"},
+		}
+		var persistentVolume, agentVolume corev1.Volume
+		if usePersistentStorage {
+			persistentVolume = corev1.Volume{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}}
+			agentVolume = corev1.Volume{Name: "agent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/qualys", Type: &directoryOrCreate}}}
+		} else {
+			persistentVolume = corev1.Volume{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
+			agentVolume = corev1.Volume{Name: "agent-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 		}
 		volumes := []corev1.Volume{
 			{Name: "socket-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
-			{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}},
-			{Name: "agent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/qualys", Type: &directoryOrCreate}}},
+			persistentVolume,
+			agentVolume,
+			{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		}
 		if rt == platform.RuntimeCRIO {
 			volumeMounts = append(volumeMounts,
@@ -1658,11 +1683,21 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "socket-volume", MountPath: socketPath, ReadOnly: true},
 			{Name: "persistent-volume", MountPath: "/usr/local/qualys/qpa/data"},
 			{Name: "agent-volume", MountPath: "/usr/local/qualys/qpa/data/conf/agent-data"},
+			{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"},
+		}
+		var persistentVol, agentVol corev1.Volume
+		if usePersistentStorage {
+			persistentVol = corev1.Volume{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}}
+			agentVol = corev1.Volume{Name: "agent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/qualys", Type: &directoryOrCreate}}}
+		} else {
+			persistentVol = corev1.Volume{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
+			agentVol = corev1.Volume{Name: "agent-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 		}
 		volumes := []corev1.Volume{
 			{Name: "socket-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
-			{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}},
-			{Name: "agent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/qualys", Type: &directoryOrCreate}}},
+			persistentVol,
+			agentVol,
+			{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		}
 		if rt == platform.RuntimeCRIO {
 			volumeMounts = append(volumeMounts,

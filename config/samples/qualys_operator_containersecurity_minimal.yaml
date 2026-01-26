@@ -24,10 +24,10 @@ spec:
       enableScaScan: true
       scanThreadPoolSize: 2
     storage:
-      usePersistentStorage: true
-      storageSize: "10Gi"
+      usePersistentStorage: false
     logging:
-      logLevel: 3
+      enableConsoleLogs: true
+      logLevel: 4
   clusterSensor:
     enabled: true
     image:

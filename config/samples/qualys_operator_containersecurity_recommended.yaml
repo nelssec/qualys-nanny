@@ -14,13 +14,16 @@ spec:
       pullPolicy: IfNotPresent
     mode: general
     k8sMode: true
-    privilegeMode: standard
+    privilegeMode: minimal
     scanning:
       enableImageScan: true
       enableContainerScan: true
       enableScaScan: true
     storage:
-      usePersistentStorage: true
+      usePersistentStorage: false
+    logging:
+      enableConsoleLogs: true
+      logLevel: 4
   clusterSensor:
     enabled: true
     image:
