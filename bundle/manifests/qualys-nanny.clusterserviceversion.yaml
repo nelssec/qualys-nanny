@@ -437,7 +437,7 @@ metadata:
       ]
     capabilities: Full Lifecycle
     categories: Security
-    containerImage: quay.io/nelssec/qualys-nanny:v0.1.0
+    containerImage: quay.io/nelssec/qualys-nanny:v0.1.1
     createdAt: "2026-01-26T02:11:54Z"
     description: Automatically deploy and manage Qualys Container Security Sensor
       on OpenShift clusters
@@ -805,4 +805,5 @@ spec:
   provider:
     name: NelsSec
     url: https://github.com/nelssec
+  replaces: qualys-nanny.v0.1.0
   version: 0.1.1
