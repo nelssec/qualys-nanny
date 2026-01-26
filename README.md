@@ -4,6 +4,17 @@ Kubernetes operator for deploying and managing Qualys security components on Ope
 
 [![OperatorHub](https://img.shields.io/badge/OperatorHub.io-qualys--nanny-blue)](https://operatorhub.io/operator/qualys-nanny)
 [![Quay.io](https://img.shields.io/badge/Quay.io-nelssec%2Fqualys--nanny-red)](https://quay.io/repository/nelssec/qualys-nanny)
+[![Version](https://img.shields.io/badge/version-0.1.1-green)](https://github.com/nelssec/qualys-nanny/releases/tag/v0.1.1)
+
+## Quick Reference
+
+| Topic | Link |
+|-------|------|
+| Privilege Modes | [What works in each mode](#privilege-modes) |
+| Platform Compatibility | [CRI-O and OpenShift versions](#platform-compatibility) |
+| ROSA/SELinux | [Special considerations](#rosaselinux-considerations) |
+| Troubleshooting | [Common issues and fixes](#troubleshooting) |
+| Full Compatibility Docs | [docs/compatibility-overview.md](docs/compatibility-overview.md) |
 
 ## Components Managed
 
@@ -15,12 +26,178 @@ Kubernetes operator for deploying and managing Qualys security components on Ope
 | Runtime Sensor | DaemonSet | eBPF-based file and process event tracking |
 | Cloud Agent | DaemonSet | Host-level vulnerability and compliance scanning |
 
+## Feature Compatibility Matrix
+
+### What Works in Each Privilege Mode
+
+| Feature | Unprivileged | Minimal | Standard | Privileged |
+|---------|:------------:|:-------:|:--------:|:----------:|
+| Image Scanning | - | Yes | Yes | Yes |
+| Container Scanning | - | Yes | Yes | Yes |
+| Static Scanning (CRI-O < 1.31) | - | Yes | Yes | Yes |
+| Dynamic Scanning | - | Yes | Yes | Yes |
+| SCA (Software Composition) | - | Yes | Yes | Yes |
+| Malware Detection | - | - | Yes | Yes |
+| Secret Detection | - | - | Yes | Yes |
+| Runtime Monitoring (eBPF) | - | - | - | Yes |
+| **Pod Security Standards** | restricted | baseline | baseline | privileged |
+| **Runs as Root** | No | Yes | Yes | Yes |
+| **Privileged Container** | No | No | No | Yes |
+
+**Legend:** Yes = Supported, - = Not Supported
+
+### Why Unprivileged Mode Doesn't Work
+
+The Qualys sensor binary requires root (UID 0) to execute. Attempts to run as non-root result in:
+```
+exec container process '/usr/bin/tini': Permission denied
+```
+
+## Platform Compatibility
+
+### OpenShift / CRI-O Versions
+
+| OpenShift | CRI-O | Static Scanning | Dynamic Scanning | Recommended Mode |
+|-----------|-------|:---------------:|:----------------:|------------------|
+| 4.16.x | 1.29.x | Yes | Yes | minimal |
+| 4.17.x | 1.30.x | Yes | Yes | minimal |
+| 4.18.x | 1.31.x | **No*** | Yes | minimal + DynamicScanningOnly |
+
+*qscanner 4.7.0 is incompatible with CRI-O 1.31's new `layers.json` format. Error: `InvalidStorageDriver:10062`
+
+### Container Runtime Support
+
+| Runtime | Static Scanning | Dynamic Scanning | Notes |
+|---------|:---------------:|:----------------:|-------|
+| CRI-O 1.30 and earlier | Yes | Yes | Full support |
+| CRI-O 1.31+ | No | Yes | Use DynamicScanningOnly |
+| containerd | Yes | Yes | Full support |
+| Docker | Yes | Yes | Full support |
+
+### Kubernetes Versions
+
+| Kubernetes | Operator Support | Notes |
+|------------|:----------------:|-------|
+| 1.25 - 1.30 | Yes | Tested |
+| 1.31+ | Yes | Should work, not yet tested |
+
+## Privilege Modes
+
+### Minimal Mode (Recommended)
+
+Best balance of security and functionality. Works on ROSA, EKS, AKS, GKE.
+
+```yaml
+spec:
+  containerSensor:
+    privilegeMode: minimal
+    scanning:
+      enableImageScan: true
+      enableContainerScan: true
+    storage:
+      usePersistentStorage: false
+    logging:
+      enableConsoleLogs: true
+      logLevel: 4
+```
+
+**Security Context:**
+- `privileged: false`
+- `runAsUser: 0` (required by sensor)
+- `allowPrivilegeEscalation: false`
+- Capabilities: `SYS_PTRACE` only
+- Compliant with **baseline** Pod Security Standards
+
+### Standard Mode
+
+Adds malware and secret detection.
+
+```yaml
+spec:
+  containerSensor:
+    privilegeMode: standard
+    scanning:
+      enableImageScan: true
+      enableContainerScan: true
+      enableMalwareDetection: true
+      enableSecretDetection: true
+```
+
+**Additional Capabilities:** `SYS_ADMIN`, `DAC_READ_SEARCH`, `SYS_CHROOT`
+
+### Privileged Mode
+
+Full functionality including Runtime Sensor (eBPF).
+
+```yaml
+spec:
+  containerSensor:
+    privilegeMode: privileged
+  runtimeSensor:
+    enabled: true
+```
+
+**Security Context:** `privileged: true`
+
+## ROSA/SELinux Considerations
+
+Red Hat OpenShift Service on AWS (ROSA) and other SELinux-enabled clusters require special handling.
+
+### Storage Recommendations for ROSA
+
+| Storage Type | SELinux Compatible | Recommended |
+|--------------|:------------------:|:-----------:|
+| `usePersistentStorage: false` | Yes | Yes |
+| `usePersistentStorage: true` | Requires SCC | No* |
+| hostPath volumes | Requires SCC | No |
+| emptyDir volumes | Yes | Yes |
+
+*Persistent storage works but requires additional SCC configuration for SELinux contexts.
+
+### Recommended ROSA Configuration
+
+```yaml
+apiVersion: qualys.io/v1
+kind: QualysContainerSecurity
+metadata:
+  name: qualys-container-security
+  namespace: qualys
+spec:
+  platformConfigRef:
+    name: qualys-platform
+  containerSensor:
+    enabled: true
+    privilegeMode: minimal
+    scanning:
+      enableImageScan: true
+      enableContainerScan: true
+      scanningPolicy: StaticScanningOnly  # Use DynamicScanningOnly for OCP 4.18+
+    storage:
+      usePersistentStorage: false
+    logging:
+      enableConsoleLogs: true
+      logLevel: 4
+  clusterSensor:
+    enabled: true
+    cloudProvider: AWS
+    clusterName: my-rosa-cluster
+```
+
+### SELinux Cache Directory Fix (v0.1.1)
+
+Version 0.1.1 includes a fix for SELinux cache directory permissions. The sensor now uses an emptyDir volume for the qscanner cache, which automatically gets proper SELinux labels.
+
+**Previous error (fixed in v0.1.1):**
+```
+failed to create cache directory: /usr/local/qualys/qpa/data/.cache/qualys/qscanner. Error: permission denied
+```
+
 ## Prerequisites
 
 - Kubernetes 1.25+ or OpenShift 4.12+
 - `kubectl` or `oc` CLI configured with cluster-admin access
 - Qualys subscription with Container Security module
-- `CUSTOMER_ID` and `ACTIVATION_ID` from Qualys portal (Container Security → Sensors → New Sensor)
+- `CUSTOMER_ID` and `ACTIVATION_ID` from Qualys portal (Container Security -> Sensors -> New Sensor)
 
 ## Installation
 
@@ -28,12 +205,12 @@ Kubernetes operator for deploying and managing Qualys security components on Ope
 
 **Option A: OperatorHub (OpenShift)**
 ```bash
-# Via OpenShift Console: Operators → OperatorHub → Search "Qualys Nanny" → Install
+# Via OpenShift Console: Operators -> OperatorHub -> Search "Qualys Nanny" -> Install
 # Or via CLI:
 oc apply -f https://operatorhub.io/install/qualys-nanny.yaml
 ```
 
-**Option A: OperatorHub (Kubernetes with OLM)**
+**Option B: OperatorHub (Kubernetes with OLM)**
 ```bash
 # Install OLM first if not present
 curl -sL https://github.com/operator-framework/operator-lifecycle-manager/releases/download/v0.28.0/install.sh | bash -s v0.28.0
@@ -43,7 +220,7 @@ kubectl create -f https://operatorhub.io/install/qualys-nanny.yaml
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded csv -n operators -l operators.coreos.com/qualys-nanny.operators --timeout=120s
 ```
 
-**Option B: Direct Manifests (no OLM)**
+**Option C: Direct Manifests (no OLM)**
 ```bash
 kubectl apply -f https://raw.githubusercontent.com/nelssec/qualys-nanny/main/dist/install.yaml
 ```
@@ -94,11 +271,14 @@ spec:
     name: qualys-platform
   containerSensor:
     enabled: true
-    privilegeMode: standard    # unprivileged | minimal | standard | privileged
+    privilegeMode: minimal
     scanning:
       enableImageScan: true
       enableContainerScan: true
-      enableScaScan: true
+    storage:
+      usePersistentStorage: false
+    logging:
+      enableConsoleLogs: true
   clusterSensor:
     enabled: true
     cloudProvider: AWS         # AWS | AZURE | GCP | OCI | SELF_MANAGED_K8S
@@ -121,93 +301,46 @@ kubectl get daemonset,deployment -n qualys
 kubectl logs -n qualys -l app.kubernetes.io/component=container-sensor --tail=50
 ```
 
-## Privilege Modes
+## Scanning Policies
 
-The Container Sensor supports four privilege modes to balance security requirements with scanning capabilities:
+| Policy | Description | Use When |
+|--------|-------------|----------|
+| `StaticScanningOnly` | Scans images from local storage | CRI-O < 1.31, containerd, Docker |
+| `DynamicScanningOnly` | Pulls and scans images via runtime API | CRI-O 1.31+, or when static fails |
+| `StaticWithDynamicScanningAsFallback` | Tries static first, falls back to dynamic | Mixed environments |
+| `DynamicWithStaticScanningAsFallback` | Tries dynamic first, falls back to static | When dynamic preferred |
 
-| Mode | Runs As | Capabilities | Features |
-|------|---------|--------------|----------|
-| `unprivileged` | UID 65534 | None | ❌ Not supported (sensor requires root) |
-| `minimal` | Root | SYS_PTRACE | Image + container scanning |
-| `standard` | Root | SYS_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_READ_SEARCH | All features + malware detection |
-| `privileged` | Root | Full privileged | All features + Runtime Sensor |
+## Troubleshooting
 
-**Note:** The Container Sensor does NOT require `privileged: true`. Use `minimal` mode for basic scanning or `standard` mode for full functionality including malware detection. Only the Runtime Sensor (eBPF) requires privileged mode.
+### Common Issues
 
-### Minimum Privilege Configuration (Recommended)
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `InvalidStorageDriver:10062` | CRI-O 1.31 incompatibility | Use `scanningPolicy: DynamicScanningOnly` |
+| `Permission denied` on cache dir | SELinux on ROSA | Upgrade to v0.1.1 |
+| `exec /usr/bin/tini: Permission denied` | Running as non-root | Use `minimal` mode (requires root) |
+| Sensor exits immediately | Storage mismatch | Set `usePersistentStorage: false` |
+| SCC permission denied | Missing SCC binding | See [OpenShift SCC](#openshift-support) section |
 
-For environments requiring minimum privileges (including ROSA and strict SELinux), use `minimal` mode with non-persistent storage:
+### Diagnostic Commands
 
-```yaml
-spec:
-  containerSensor:
-    privilegeMode: minimal
-    scanning:
-      scanningPolicy: StaticScanningOnly  # or DynamicScanningOnly for CRI-O 1.31+
-    storage:
-      usePersistentStorage: false
-    logging:
-      enableConsoleLogs: true
-      logLevel: 4
+```bash
+# Check pod status and events
+kubectl describe pod -n qualys -l app.kubernetes.io/component=container-sensor
+
+# Check sensor logs
+kubectl logs -n qualys -l app.kubernetes.io/component=container-sensor -f
+
+# Check operator logs
+kubectl logs -n qualys -l control-plane=controller-manager
+
+# Verify CRI-O version (OpenShift)
+oc debug node/<node-name> -- chroot /host crio --version
+
+# Check SCC assignments (OpenShift)
+oc get scc | grep qualys
+oc adm policy who-can use scc qualys-container-sensor-minimal
 ```
-
-This runs with:
-- `privileged: false`
-- `runAsUser: 0` (root required by sensor binary)
-- Only `SYS_PTRACE` capability
-- Read-only access to container storage
-- No SELinux issues (uses emptyDir volumes)
-- Console logging for easy `kubectl logs` access
-
-## CRI-O Compatibility
-
-> ⚠️ **Important**: Static scanning has known compatibility issues with newer CRI-O versions.
-
-| CRI-O Version | OpenShift | Static Scanning | Dynamic Scanning |
-|---------------|-----------|-----------------|------------------|
-| 1.30.x | 4.17.x | ✅ Works | ✅ Works |
-| 1.31.x | 4.18.x | ❌ Fails* | ✅ Works |
-
-*qscanner 4.7.0 is incompatible with CRI-O 1.31's new `layers.json` format. Error: `InvalidStorageDriver:10062`
-
-**Workaround for CRI-O 1.31+**: Use `scanningPolicy: DynamicScanningOnly`
-
-For detailed compatibility information, see [docs/compatibility-overview.md](docs/compatibility-overview.md).
-
-## Sample Configurations
-
-| File | Use Case |
-|------|----------|
-| `qualys_operator_containersecurity_recommended.yaml` | Recommended default (standard mode) |
-| `qualys_operator_containersecurity_standard.yaml` | Full configuration with all options |
-| `qualys_operator_containersecurity_minimal.yaml` | Baseline PSS compliant |
-| `qualys_operator_containersecurity_unprivileged.yaml` | Restricted PSS compliant |
-| `qualys_operator_containersecurity_privileged.yaml` | All features + Runtime Sensor |
-
-## Operator Permissions
-
-The operator requires the following RBAC permissions:
-
-### Core Resources
-- ServiceAccounts, ConfigMaps, Secrets, Services: full CRUD
-- Nodes, Pods, Namespaces: get, list, watch
-- Events: create, patch
-
-### Workload Resources
-- DaemonSets, Deployments: full CRUD
-- Jobs, CronJobs: get, list, watch, create, delete
-
-### RBAC Resources
-- ClusterRoles, ClusterRoleBindings, Roles, RoleBindings: full CRUD
-
-### Admission Resources
-- ValidatingWebhookConfigurations: full CRUD
-
-### OpenShift Resources
-- SecurityContextConstraints: full CRUD (OpenShift only)
-
-### Cluster-wide Read Access
-- All resources: get, list (required for Cluster Sensor)
 
 ## Platform URLs
 
@@ -223,16 +356,14 @@ Find your regional Qualys platform URLs at: https://www.qualys.com/platform-iden
 
 ## Cloud Provider Configuration
 
-For the Cluster Sensor, specify your cloud provider and cluster identifier:
-
-### AWS
+### AWS (EKS/ROSA)
 ```yaml
 clusterSensor:
   cloudProvider: AWS
   clusterID: "arn:aws:eks:us-east-1:123456789:cluster/my-cluster"
 ```
 
-### Azure
+### Azure (AKS)
 ```yaml
 clusterSensor:
   cloudProvider: AZURE
@@ -240,7 +371,7 @@ clusterSensor:
   clusterRegion: "eastus"
 ```
 
-### GCP
+### GCP (GKE)
 ```yaml
 clusterSensor:
   cloudProvider: GCP
@@ -256,24 +387,24 @@ clusterSensor:
 
 ## OpenShift Support
 
-On OpenShift, the operator automatically creates SecurityContextConstraints (SCCs) for each component:
+On OpenShift, the operator automatically creates SecurityContextConstraints (SCCs):
 
-| Component | SCC Permissions |
-|-----------|----------------|
-| Container Sensor | hostNetwork, hostPID, runtime socket access |
-| Cluster Sensor | Non-privileged (runs as user 555) |
-| Runtime Sensor | Privileged (required for eBPF) |
-| Cloud Agent | Privileged, hostPID, SYS_ADMIN |
+| Component | SCC Name | Key Permissions |
+|-----------|----------|-----------------|
+| Container Sensor (minimal) | qualys-container-sensor-minimal | SYS_PTRACE, hostPath |
+| Container Sensor (standard) | qualys-container-sensor-standard | SYS_ADMIN, DAC_READ_SEARCH |
+| Container Sensor (privileged) | qualys-container-sensor-privileged | privileged |
+| Cluster Sensor | qualys-cluster-sensor | Non-privileged (runs as user 555) |
+| Runtime Sensor | qualys-runtime-sensor | Privileged (required for eBPF) |
 
-## Verification
+## Sample Configurations
 
-```bash
-kubectl get qualysplatformconfig
-kubectl get qualyscontainersecurity -n qualys
-kubectl get pods -n qualys
-kubectl get daemonset -n qualys
-kubectl get deployment -n qualys
-```
+| File | Use Case | Privilege Mode |
+|------|----------|----------------|
+| `qualys_operator_containersecurity_recommended.yaml` | ROSA/SELinux compatible | minimal |
+| `qualys_operator_containersecurity_minimal.yaml` | Baseline PSS compliant | minimal |
+| `qualys_operator_containersecurity_standard.yaml` | Full scanning + malware | standard |
+| `qualys_operator_containersecurity_privileged.yaml` | All features + Runtime | privileged |
 
 ## Building from Source
 
@@ -288,6 +419,13 @@ make build-installer IMG=<your-registry>/qualys-nanny:latest
 
 - [Compatibility Overview](docs/compatibility-overview.md) - Detailed privilege modes, CRI-O compatibility, and troubleshooting
 - [CRI-O 1.31 Analysis](docs/qscanner-crio-131-compatibility.md) - Technical analysis of qscanner compatibility issues
+
+## Release History
+
+| Version | Date | Key Changes |
+|---------|------|-------------|
+| 0.1.1 | 2026-01-25 | Fixed SELinux cache directory permissions, added qscanner-cache volume |
+| 0.1.0 | 2026-01-20 | Initial release |
 
 ## License
 
