@@ -123,7 +123,8 @@ metadata:
               },
               "k8sMode": true,
               "logging": {
-                "logLevel": 3
+                "enableConsoleLogs": true,
+                "logLevel": 4
               },
               "mode": "general",
               "privilegeMode": "minimal",
@@ -134,8 +135,7 @@ metadata:
                 "scanThreadPoolSize": 2
               },
               "storage": {
-                "storageSize": "10Gi",
-                "usePersistentStorage": true
+                "usePersistentStorage": false
               }
             },
             "platformConfigRef": {
@@ -372,15 +372,19 @@ metadata:
                 "tag": "latest"
               },
               "k8sMode": true,
+              "logging": {
+                "enableConsoleLogs": true,
+                "logLevel": 4
+              },
               "mode": "general",
-              "privilegeMode": "standard",
+              "privilegeMode": "minimal",
               "scanning": {
                 "enableContainerScan": true,
                 "enableImageScan": true,
                 "enableScaScan": true
               },
               "storage": {
-                "usePersistentStorage": true
+                "usePersistentStorage": false
               }
             },
             "platformConfigRef": {
@@ -434,26 +438,24 @@ metadata:
     capabilities: Full Lifecycle
     categories: Security
     containerImage: quay.io/nelssec/qualys-nanny:v0.1.0
-    createdAt: "2026-01-25T16:40:50Z"
+    createdAt: "2026-01-26T02:11:54Z"
     description: Automatically deploy and manage Qualys Container Security Sensor
       on OpenShift clusters
     operators.operatorframework.io/builder: operator-sdk-v1.42.0
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
     repository: https://github.com/nelssec/qualys-nanny
     support: NelsSec
-  name: qualys-nanny.v0.1.0
+  name: qualys-nanny.v0.1.1
   namespace: placeholder
 spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
-    - description: Deploys and manages Qualys security sensors including Container Sensor, Cluster Sensor, Admission Controller, and Runtime Sensor for vulnerability scanning and compliance monitoring.
-      displayName: Qualys Container Security
+    - displayName: Qualys Container Security
       kind: QualysContainerSecurity
       name: qualyscontainersecurities.qualys.io
       version: v1
-    - description: Configures Qualys platform connection settings including server URLs, gateway endpoints, and credential references for authenticating with Qualys Cloud Platform.
-      displayName: Qualys Platform Config
+    - displayName: Qualys Platform Config
       kind: QualysPlatformConfig
       name: qualysplatformconfigs.qualys.io
       version: v1
@@ -707,7 +709,7 @@ spec:
                 - --health-probe-bind-address=:8081
                 command:
                 - /manager
-                image: quay.io/nelssec/qualys-nanny:v0.1.0
+                image: quay.io/nelssec/qualys-nanny:v0.1.1
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -803,4 +805,4 @@ spec:
   provider:
     name: NelsSec
     url: https://github.com/nelssec
-  version: 0.1.0
+  version: 0.1.1
