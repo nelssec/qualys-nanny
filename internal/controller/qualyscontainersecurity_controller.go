@@ -1622,12 +1622,12 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "runtime-socket", MountPath: socketPath},
 			{Name: "host-root", MountPath: "/host", ReadOnly: true},
 			{Name: "sensor-data", MountPath: "/usr/local/qualys/qpa/data"},
-			{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"},
 			{Name: "tmp", MountPath: "/tmp"},
 		}
 		var sensorDataVolume corev1.Volume
 		if usePersistentStorage {
 			sensorDataVolume = corev1.Volume{Name: "sensor-data", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}}
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"})
 		} else {
 			sensorDataVolume = corev1.Volume{Name: "sensor-data", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 		}
@@ -1635,8 +1635,10 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "runtime-socket", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
 			{Name: "host-root", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/", Type: &directory}}},
 			sensorDataVolume,
-			{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			{Name: "tmp", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		}
+		if usePersistentStorage {
+			volumes = append(volumes, corev1.Volume{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 		}
 		if rt == platform.RuntimeCRIO {
 			volumeMounts = append(volumeMounts,
@@ -1655,12 +1657,12 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "socket-volume", MountPath: socketPath, ReadOnly: true},
 			{Name: "persistent-volume", MountPath: "/usr/local/qualys/qpa/data"},
 			{Name: "agent-volume", MountPath: "/usr/local/qualys/qpa/data/conf/agent-data"},
-			{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"},
 		}
 		var persistentVolume, agentVolume corev1.Volume
 		if usePersistentStorage {
 			persistentVolume = corev1.Volume{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}}
 			agentVolume = corev1.Volume{Name: "agent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/qualys", Type: &directoryOrCreate}}}
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"})
 		} else {
 			persistentVolume = corev1.Volume{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 			agentVolume = corev1.Volume{Name: "agent-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
@@ -1669,7 +1671,9 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "socket-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
 			persistentVolume,
 			agentVolume,
-			{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		}
+		if usePersistentStorage {
+			volumes = append(volumes, corev1.Volume{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 		}
 		if rt == platform.RuntimeCRIO {
 			volumeMounts = append(volumeMounts,
@@ -1688,12 +1692,12 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "socket-volume", MountPath: socketPath, ReadOnly: true},
 			{Name: "persistent-volume", MountPath: "/usr/local/qualys/qpa/data"},
 			{Name: "agent-volume", MountPath: "/usr/local/qualys/qpa/data/conf/agent-data"},
-			{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"},
 		}
 		var persistentVol, agentVol corev1.Volume
 		if usePersistentStorage {
 			persistentVol = corev1.Volume{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/usr/local/qualys/sensor/data", Type: &directoryOrCreate}}}
 			agentVol = corev1.Volume{Name: "agent-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/etc/qualys", Type: &directoryOrCreate}}}
+			volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"})
 		} else {
 			persistentVol = corev1.Volume{Name: "persistent-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 			agentVol = corev1.Volume{Name: "agent-volume", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
@@ -1702,7 +1706,9 @@ func buildContainerSensorVolumes(socketPath string, rt platform.ContainerRuntime
 			{Name: "socket-volume", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: socketPath, Type: &socket}}},
 			persistentVol,
 			agentVol,
-			{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+		}
+		if usePersistentStorage {
+			volumes = append(volumes, corev1.Volume{Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
 		}
 		if rt == platform.RuntimeCRIO {
 			volumeMounts = append(volumeMounts,
