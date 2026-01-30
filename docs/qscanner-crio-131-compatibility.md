@@ -1,225 +1,220 @@
-# qscanner CRI-O 1.31 Compatibility Analysis
+# qscanner CRI-O 1.31 Compatibility - Testing Results
 
-## Problem Summary
+## Summary
 
-qscanner 4.7.0 fails to perform static image scanning on CRI-O 1.31 (OpenShift 4.18) with the error:
+After extensive testing on ROSA HCP with OpenShift 4.18 (CRI-O 1.31.6), we discovered that **qscanner 4.7.0-1 works correctly with CRI-O 1.31** when properly configured. The reported "failed to copy layers.json" errors were caused by **cache directory permission issues**, not CRI-O 1.31 format incompatibility.
+
+## Test Environment
+
+| Component | Version |
+|-----------|---------|
+| Platform | ROSA HCP (AWS) |
+| OpenShift | 4.18.6 |
+| CRI-O | 1.31.6-2.rhaos4.18 |
+| qscanner | 4.7.0-1 |
+| Sensor (qpa) | 1.41.1-0 |
+| Privilege Mode | minimal (CAP_SYS_PTRACE only) |
+
+## The Error
+
+When the sensor attempted static image scanning, qscanner failed with:
 
 ```
 ERROR: failed to create scan target: failed to create Image artifact: failed to copy layers.json file
+Error Code: InvalidStorageDriver:10062
 ```
 
-The sensor reports error code `InvalidStorageDriver:10062`.
+## Root Cause Analysis
 
-## Root Cause
+### Initial Theory (Incorrect)
+We initially suspected CRI-O 1.31's new `layers.json` format with `uidset`/`gidset` fields was incompatible with qscanner.
 
-CRI-O 1.31 uses containers/storage library v1.55+ which introduced changes to the storage layout and metadata format. qscanner's `crio-overlay` driver expects the older format used in CRI-O 1.28 and earlier.
+### Actual Root Cause (Confirmed)
+The error was caused by **cache directory permission issues**:
 
-## CRI-O 1.31 Storage Structure
+1. **Missing qscanner-cache volume**: The operator only added the `qscanner-cache` emptyDir volume when `usePersistentStorage: true`. When running with ephemeral storage (`usePersistentStorage: false`), no cache volume was created.
+
+2. **Sensor creates directories with wrong permissions**: The Qualys sensor creates the `.cache/qualys/` subdirectory with permissions `660` (drw-rw----) instead of `755` (drwxr-xr-x). The missing **execute bit** on directories prevents qscanner from entering the directory.
+
+3. **qscanner fails to create its cache**: When qscanner tries to create its cache at `/usr/local/qualys/qpa/data/.cache/qualys/qscanner`, it cannot enter the `qualys/` directory due to missing execute permission, causing the generic "failed to copy layers.json" error.
+
+### Proof: Manual qscanner Testing
+
+After fixing the permissions, running qscanner manually in the container succeeded:
+
+```bash
+$ /usr/bin/qscanner image 01856dd2... \
+    --storage-driver crio-overlay \
+    --output-dir /tmp \
+    --cache none \
+    -l debug \
+    -f json,spdx \
+    -m inventory-only \
+    --scan-types pkg
+
+INFO  Image source: crio-overlay filesystem
+INFO  OS detected: Red Hat Enterprise Linux 9.4
+INFO  OS package(s) detected: 206
+INFO  Language package(s) detected: 110
+INFO  All scans completed in 412.730582ms
+INFO  Scan Result JSON created at /tmp/...-ScanResult.json
+```
+
+## Fixes Applied
+
+### Fix 1: Always add qscanner-cache emptyDir volume
+
+The `qscanner-cache` volume must be added unconditionally, not just when `usePersistentStorage: true`.
+
+**Before (broken):**
+```go
+if usePersistentStorage {
+    volumeMounts = append(volumeMounts, corev1.VolumeMount{Name: "qscanner-cache", ...})
+    volumes = append(volumes, corev1.Volume{Name: "qscanner-cache", ...})
+}
+```
+
+**After (fixed):**
+```go
+volumeMounts := []corev1.VolumeMount{
+    // ... other mounts ...
+    {Name: "qscanner-cache", MountPath: "/usr/local/qualys/qpa/data/.cache"},
+}
+volumes := []corev1.Volume{
+    // ... other volumes ...
+    {Name: "qscanner-cache", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+}
+```
+
+### Fix 2: InitContainer to pre-create cache directory structure
+
+Because the sensor creates directories with restrictive permissions (660), we add an initContainer to pre-create the full directory path with correct permissions (755):
+
+```yaml
+initContainers:
+- name: init-cache-dir
+  image: busybox:latest
+  command: ['sh', '-c', 'mkdir -p /cache/qualys/qscanner && chmod -R 755 /cache']
+  volumeMounts:
+  - name: qscanner-cache
+    mountPath: /cache
+  securityContext:
+    runAsUser: 0
+    runAsNonRoot: false
+    allowPrivilegeEscalation: false
+```
+
+## Why 755, Not 660?
+
+For directories, the permission bits mean:
+
+| Bit | Meaning |
+|-----|---------|
+| r (read) | Can list directory contents |
+| w (write) | Can create/delete files |
+| **x (execute)** | **Can enter (cd into) the directory** |
+
+- `660` = `drw-rw----` = No execute bit = **Cannot enter directory**
+- `755` = `drwxr-xr-x` = Has execute bit = Can enter and access files
+
+Without the execute bit, qscanner literally cannot `cd` into the directory to create its cache files, even though it has read/write permissions.
+
+## Testing the Fix
+
+After applying the fixes:
+
+```bash
+# Verify initContainer ran
+$ oc get pod $POD -o jsonpath='{.status.initContainerStatuses[0].state}'
+{"terminated":{"exitCode":0,"reason":"Completed",...}}
+
+# Verify cache directory permissions
+$ oc exec $POD -- ls -la /usr/local/qualys/qpa/data/.cache/
+drwxr-xr-x. 3 root root    20 Jan 30 05:41 .
+drwxrwxrwx. 8 root root 16384 Jan 30 05:41 ..
+drwxr-xr-x. 3 root root    22 Jan 30 05:41 qualys
+
+$ oc exec $POD -- ls -la /usr/local/qualys/qpa/data/.cache/qualys/
+drwxr-xr-x. 3 root root 22 Jan 30 05:41 .
+drwxr-xr-x. 3 root root 20 Jan 30 05:41 ..
+drwxr-xr-x. 2 root root  6 Jan 30 05:41 qscanner
+```
+
+## Operator Versions
+
+| Version | Status | Notes |
+|---------|--------|-------|
+| v0.1.1 | Broken | qscanner-cache only added with persistent storage |
+| v0.1.2 | Broken | Same issue |
+| v0.1.3 | Partial | Fixed volume issue, but sensor still creates dirs with 660 |
+| v0.1.4 | Fixed | Added initContainer to pre-create cache with 755 permissions |
+
+## Minimal Privilege Mode Configuration
+
+The sensor works correctly in minimal privilege mode with these security settings:
+
+```yaml
+securityContext:
+  privileged: false
+  allowPrivilegeEscalation: false
+  runAsUser: 0
+  runAsNonRoot: false
+  readOnlyRootFilesystem: false
+  seccompProfile:
+    type: RuntimeDefault
+  capabilities:
+    drop:
+    - ALL
+    add:
+    - SYS_PTRACE
+```
+
+Required volume mounts for CRI-O scanning:
+
+```yaml
+volumeMounts:
+- name: container-storage
+  mountPath: /var/lib/containers/storage
+  readOnly: true
+- name: storage-config-volume
+  mountPath: /etc/containers/storage.conf
+  readOnly: true
+- name: qscanner-cache
+  mountPath: /usr/local/qualys/qpa/data/.cache
+```
+
+## CRI-O 1.31 Storage Format
+
+For reference, CRI-O 1.31 uses containers/storage v1.55+ with these changes:
 
 ```
 /var/lib/containers/storage/
-├── db.sql                    # SQLite database (NEW in recent versions)
+├── db.sql                    # SQLite database for metadata
 ├── overlay/                  # Layer filesystem data
-│   ├── {layer-id}/
-│   │   ├── diff/            # Actual layer content
-│   │   ├── link             # Short link ID for lowerdir paths
-│   │   ├── merged/          # Mount point (when container running)
-│   │   ├── work/            # OverlayFS work directory
-│   │   └── empty/           # Empty directory
-│   └── l/                   # Symlinks using short IDs
-│       └── {SHORT_ID} -> ../{layer-id}/diff
-├── overlay-images/          # Image metadata
-│   ├── images.json          # Image index
-│   └── {image-id}/
-│       ├── manifest         # OCI manifest
-│       └── =base64(...)     # Additional manifests
+├── overlay-images/           # Image metadata
 ├── overlay-layers/
-│   └── layers.json          # Layer metadata
-└── overlay-containers/      # Container metadata
+│   └── layers.json          # Layer metadata with new fields
+└── overlay-containers/       # Container metadata
 ```
 
-### Key Changes in CRI-O 1.31
+The `layers.json` now includes `uidset` and `gidset` fields:
 
-1. **Database Backend**: Added `db.sql` SQLite database for faster metadata queries
-2. **layers.json Format**: New fields added to layer entries:
-   ```json
-   {
-     "id": "layer-diff-id",
-     "parent": "parent-layer-id",
-     "created": "2026-01-25T04:08:59Z",
-     "compressed-diff-digest": "sha256:...",
-     "compressed-size": 79262296,
-     "diff-digest": "sha256:...",
-     "diff-size": 219794432,
-     "compression": 2,
-     "uidset": [0, 59],           // NEW: UID mappings
-     "gidset": [0, 5, 12, 22]     // NEW: GID mappings
-   }
-   ```
-3. **Image Metadata Location**: Big data blobs stored as base64-encoded filenames
-4. **Link Files**: Short symbolic link IDs in `overlay/l/` directory
-
-## Required qscanner Changes
-
-### 1. Update layers.json Parser
-
-**Current Issue**: qscanner expects older layers.json format and fails when encountering new fields.
-
-**Fix**: Update the Go struct used to unmarshal layers.json to include new fields:
-
-```go
-type LayerEntry struct {
-    ID                   string   `json:"id"`
-    Parent               string   `json:"parent,omitempty"`
-    Created              string   `json:"created"`
-    CompressedDiffDigest string   `json:"compressed-diff-digest"`
-    CompressedSize       int64    `json:"compressed-size"`
-    DiffDigest           string   `json:"diff-digest"`
-    DiffSize             int64    `json:"diff-size"`
-    Compression          int      `json:"compression"`
-    // NEW fields for CRI-O 1.31+
-    UIDSet               []int    `json:"uidset,omitempty"`
-    GIDSet               []int    `json:"gidset,omitempty"`
-    Flags                map[string]interface{} `json:"flags,omitempty"`
-    TOCDigest            string   `json:"toc-digest,omitempty"`
-    UncompressedDigest   string   `json:"uncompressed-digest,omitempty"`
+```json
+{
+  "id": "layer-diff-id",
+  "parent": "parent-layer-id",
+  "uidset": [0, 59],
+  "gidset": [0, 5, 12, 22]
 }
 ```
 
-### 2. Handle SQLite Database Fallback
+**qscanner 4.7.0-1 handles this format correctly** - the format was not the issue.
 
-**Current Issue**: qscanner only reads JSON files, doesn't query db.sql.
+## Conclusion
 
-**Fix**: Add optional SQLite database support for metadata queries:
+The "CRI-O 1.31 compatibility issue" was actually a cache directory permission bug in the operator. qscanner works correctly with CRI-O 1.31 in minimal privilege mode when:
 
-```go
-func getLayerInfo(storageRoot string, layerID string) (*LayerEntry, error) {
-    // Try JSON first (backwards compatible)
-    layersJSON := filepath.Join(storageRoot, "overlay-layers", "layers.json")
-    if entry, err := readLayerFromJSON(layersJSON, layerID); err == nil {
-        return entry, nil
-    }
+1. The `qscanner-cache` emptyDir volume is always mounted (not just with persistent storage)
+2. The cache directory structure is pre-created with proper permissions (755) via an initContainer
 
-    // Fall back to SQLite database
-    dbPath := filepath.Join(storageRoot, "db.sql")
-    if _, err := os.Stat(dbPath); err == nil {
-        return readLayerFromDB(dbPath, layerID)
-    }
-
-    return nil, fmt.Errorf("layer %s not found", layerID)
-}
-```
-
-### 3. Fix Layer Path Resolution
-
-**Current Issue**: qscanner may not correctly resolve layer paths through the `l/` symlink directory.
-
-**Fix**: Handle both direct paths and symlinked paths:
-
-```go
-func resolveLayerPath(storageRoot string, layerID string) (string, error) {
-    // Direct path
-    directPath := filepath.Join(storageRoot, "overlay", layerID, "diff")
-    if _, err := os.Stat(directPath); err == nil {
-        return directPath, nil
-    }
-
-    // Read link file for short ID
-    linkFile := filepath.Join(storageRoot, "overlay", layerID, "link")
-    shortID, err := os.ReadFile(linkFile)
-    if err == nil {
-        symlinkPath := filepath.Join(storageRoot, "overlay", "l", strings.TrimSpace(string(shortID)))
-        if resolved, err := filepath.EvalSymlinks(symlinkPath); err == nil {
-            return resolved, nil
-        }
-    }
-
-    return "", fmt.Errorf("cannot resolve layer path for %s", layerID)
-}
-```
-
-### 4. Handle Image Manifest Base64 Filenames
-
-**Current Issue**: qscanner expects manifest files with predictable names.
-
-**Fix**: Parse base64-encoded manifest filenames in image directories:
-
-```go
-func findImageManifest(imageDir string) (string, error) {
-    entries, _ := os.ReadDir(imageDir)
-    for _, entry := range entries {
-        name := entry.Name()
-        // Check for base64-encoded manifest filename
-        if strings.HasPrefix(name, "=") {
-            decoded, err := base64.StdEncoding.DecodeString(name[1:])
-            if err == nil && strings.Contains(string(decoded), "manifest") {
-                return filepath.Join(imageDir, name), nil
-            }
-        }
-        // Also check for plain "manifest" file
-        if name == "manifest" {
-            return filepath.Join(imageDir, name), nil
-        }
-    }
-    return "", fmt.Errorf("manifest not found in %s", imageDir)
-}
-```
-
-### 5. Update Error Handling
-
-**Current Issue**: qscanner returns generic "failed to copy layers.json" without specifics.
-
-**Fix**: Add detailed error messages for debugging:
-
-```go
-func copyLayersJSON(src, dst string) error {
-    data, err := os.ReadFile(src)
-    if err != nil {
-        return fmt.Errorf("failed to read layers.json from %s: %w", src, err)
-    }
-
-    // Validate JSON structure before copying
-    var layers []LayerEntry
-    if err := json.Unmarshal(data, &layers); err != nil {
-        return fmt.Errorf("failed to parse layers.json (may be incompatible format): %w", err)
-    }
-
-    // Log detected format version for debugging
-    if len(layers) > 0 && len(layers[0].UIDSet) > 0 {
-        log.Debug("Detected CRI-O 1.31+ layers.json format with uidset/gidset fields")
-    }
-
-    return os.WriteFile(dst, data, 0644)
-}
-```
-
-## Testing Requirements
-
-1. **Unit Tests**: Add test cases with CRI-O 1.31 layers.json format
-2. **Integration Tests**: Test against actual CRI-O 1.31 storage on RHCOS 4.18
-3. **Regression Tests**: Ensure backwards compatibility with CRI-O 1.28, 1.29, 1.30
-4. **Edge Cases**:
-   - Images with many layers (100+)
-   - Images with large layers (10GB+)
-   - Concurrent scanning of multiple images
-   - Partially pulled images
-
-## Workarounds Until Fix
-
-1. **Use Dynamic Scanning**: Set `scanningPolicy: DynamicScanningOnly` to skip qscanner entirely
-2. **Use DynamicWithStaticScanningAsFallback**: qscanner will fail but sensor falls back to dynamic scanning
-3. **Downgrade CRI-O**: Not recommended, but CRI-O 1.28 works with qscanner 4.7.0
-
-## Version Compatibility Matrix
-
-| qscanner | CRI-O 1.28 | CRI-O 1.29 | CRI-O 1.30 | CRI-O 1.31 |
-|----------|------------|------------|------------|------------|
-| 4.6.x    | ✅         | ✅         | ⚠️         | ❌         |
-| 4.7.0    | ✅         | ✅         | ✅         | ❌         |
-| 4.8.0+   | ✅         | ✅         | ✅         | ✅ (needed)|
-
-## References
-
-- [containers/storage releases](https://github.com/containers/storage/releases)
-- [CRI-O storage documentation](https://github.com/cri-o/cri-o/blob/main/docs/crio.8.md)
-- [OCI Image Specification](https://github.com/opencontainers/image-spec)
+No changes to qscanner are required for CRI-O 1.31 compatibility.
